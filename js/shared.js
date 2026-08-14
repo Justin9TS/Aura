@@ -19,7 +19,8 @@ const ICONS = {
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>',
   globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
   returns: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 7v5l3 3"/></svg>',
-  check: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>'
+  check: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>',
+  support: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13a8 8 0 0 1 16 0"/><rect x="2.5" y="13" width="4" height="6" rx="2"/><rect x="17.5" y="13" width="4" height="6" rx="2"/><path d="M19.5 19v1a2.5 2.5 0 0 1-2.5 2.5h-3"/></svg>'
 };
 
 // Prices live in USD internally; these render them in whatever currency
@@ -169,10 +170,10 @@ const CHROME_FOOTER = `
 
 <div class="discount-modal" id="discountModal" aria-hidden="true">
   <div class="discount-head">
-    <h2>Discount</h2>
+    <h2>Get 15% off</h2>
     <button class="cart-close" id="discountCloseBtn" type="button" aria-label="Close discount panel">✕</button>
   </div>
-  <div class="discount-body">This is the discount tab — empty for now.</div>
+  <div class="discount-body" id="discountBody"></div>
 </div>
 
 <div class="cookie-banner" id="cookieBanner">
@@ -670,6 +671,98 @@ async function renderLoggedIn(body, user){
   }
 }
 
+/* ---------- Discount signup (email + phone, verify by link) ---------- */
+// The email is remembered so the modal survives closing/reopening while
+// the visitor goes off to click the link in their inbox.
+const DISCOUNT_EMAIL_KEY = "aura-discount-email";
+
+function renderDiscountForm(){
+  const body = document.getElementById("discountBody");
+  body.innerHTML = "";
+
+  const intro = el("p", "discount-intro",
+    "Subscribe with your email and phone, verify, and get <strong>15% off all orders</strong>.");
+  body.appendChild(intro);
+
+  const form = el("form", "auth-form discount-form");
+  form.noValidate = true;
+
+  const email = el("input", "auth-input");
+  email.type = "email"; email.placeholder = "Email"; email.autocomplete = "email";
+  email.maxLength = 254;
+  try { email.value = localStorage.getItem(DISCOUNT_EMAIL_KEY) || ""; } catch(e){}
+
+  const phone = el("input", "auth-input");
+  phone.type = "tel"; phone.placeholder = "Phone number"; phone.autocomplete = "tel";
+  phone.maxLength = 20;
+
+  const trap = el("input", "hp-field");
+  trap.type = "text"; trap.name = "website"; trap.tabIndex = -1;
+  trap.autocomplete = "off"; trap.setAttribute("aria-hidden", "true");
+
+  const note = el("div", "discount-note",
+    "We'll email you a verification link — it expires in 10 minutes.");
+
+  const error = el("div", "auth-error");
+
+  const sendBtn = el("button", "auth-submit secondary", "Send Verification");
+  sendBtn.type = "button";
+
+  const continueBtn = el("button", "auth-submit", "Continue");
+  continueBtn.type = "submit";
+
+  form.appendChild(email); form.appendChild(phone); form.appendChild(trap);
+  form.appendChild(note); form.appendChild(error);
+  form.appendChild(sendBtn); form.appendChild(continueBtn);
+  body.appendChild(form);
+
+  sendBtn.addEventListener("click", async () => {
+    error.textContent = "";
+    sendBtn.disabled = true;
+    try {
+      await apiDiscountSend(email.value.trim(), phone.value.trim(), trap.value);
+      try { localStorage.setItem(DISCOUNT_EMAIL_KEY, email.value.trim()); } catch(e){}
+      showToast("Verification link sent — check your email.");
+    } catch(err){
+      error.textContent = err instanceof TypeError ? "No backend running." : err.message;
+    }
+    sendBtn.disabled = false;
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    continueBtn.disabled = true;
+    try {
+      const result = await apiDiscountContinue(email.value.trim());
+      renderDiscountSuccess(body, result.code);
+      showToast("Verified — enjoy your 15% off!");
+    } catch(err){
+      const msg = err instanceof TypeError ? "No backend running." : err.message;
+      error.textContent = msg;
+      showToast(msg);
+      continueBtn.disabled = false;
+    }
+  });
+}
+
+function renderDiscountSuccess(body, code){
+  body.innerHTML = "";
+  body.appendChild(el("div", "discount-success-icon", ICONS.check));
+  body.appendChild(el("h3", "discount-success-title", "You're in!"));
+  const p = el("p", "discount-intro");
+  p.innerHTML = "Use code <strong class='discount-code'>" + code + "</strong> for 15% off all orders.";
+  body.appendChild(p);
+}
+
+renderDiscountForm();
+
+// The hero banner's Unlock button (home page only) opens this modal.
+const heroUnlockBtn = document.getElementById("heroUnlockBtn");
+if(heroUnlockBtn){
+  heroUnlockBtn.addEventListener("click", () => openPanel("discount"));
+}
+
 /* ---------- Country / currency picker ---------- */
 // Shows the country we detected (or the one matching the chosen
 // currency) and lets the shopper switch. Changing it reloads so every
@@ -736,15 +829,23 @@ currencyReady.then(() => {
 });
 
 /* ---------- Cookie notice ---------- */
+// The choice is remembered in localStorage, so the banner only ever
+// appears until the visitor answers once.
+const COOKIE_CHOICE_KEY = "aura-cookie-choice";
 const cookieBanner = document.getElementById("cookieBanner");
-function dismissCookies(message){
+function dismissCookies(choice, message){
+  try { localStorage.setItem(COOKIE_CHOICE_KEY, choice); } catch(e){ /* private mode */ }
   cookieBanner.classList.remove("show");
   showToast(message);
 }
-document.getElementById("cookieAllow").addEventListener("click", () => dismissCookies("All cookies allowed."));
-document.getElementById("cookieReject").addEventListener("click", () => dismissCookies("Non-essential cookies rejected."));
-document.getElementById("cookieSettings").addEventListener("click", () => dismissCookies("Cookie preferences saved."));
-setTimeout(() => cookieBanner.classList.add("show"), 400);
+document.getElementById("cookieAllow").addEventListener("click", () => dismissCookies("allow", "All cookies allowed."));
+document.getElementById("cookieReject").addEventListener("click", () => dismissCookies("reject", "Non-essential cookies rejected."));
+document.getElementById("cookieSettings").addEventListener("click", () => dismissCookies("custom", "Cookie preferences saved."));
+let cookieChoice = null;
+try { cookieChoice = localStorage.getItem(COOKIE_CHOICE_KEY); } catch(e){ /* private mode */ }
+if(!cookieChoice){
+  setTimeout(() => cookieBanner.classList.add("show"), 400);
+}
 
 // Wait for the currency so the cart never flashes the wrong prices.
 currencyReady.then(renderCart);

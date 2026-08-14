@@ -47,3 +47,11 @@ function apiReset(email, code, newPassword){ return apiRequest("POST", "/api/aut
 function apiLogout(){ return apiRequest("POST", "/api/auth/logout"); }
 function apiMe(){ return apiRequest("GET", "/api/auth/me"); }
 function apiOrders(){ return apiRequest("GET", "/api/orders"); }
+
+function apiDiscountSend(email, phone, website){ return apiRequest("POST", "/api/discount/send", { email, phone, website }); }
+function apiDiscountContinue(email){ return apiRequest("POST", "/api/discount/continue", { email }); }
+function apiDiscountVerify(token){ return apiRequest("POST", "/api/discount/verify", { token }); }
+
+function apiReviews(slug){ return apiRequest("GET", "/api/products/" + encodeURIComponent(slug) + "/reviews"); }
+function apiCanReview(slug){ return apiRequest("GET", "/api/products/" + encodeURIComponent(slug) + "/can-review"); }
+function apiPostReview(slug, rating, body){ return apiRequest("POST", "/api/products/" + encodeURIComponent(slug) + "/reviews", { rating, body }); }

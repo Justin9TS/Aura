@@ -99,10 +99,6 @@ Promise.all([productsReady, currencyReady]).then(([products]) => {
     '<span class="review-label">' + (product.reviews || 0) + " reviews</span>");
   details.appendChild(ratingRow);
 
-  const setPill = el("div", "set-pill",
-    ICONS.gift + " <strong>Build Your Own Set:</strong> save up to 20% + get 3 free gifts");
-  details.appendChild(setPill);
-
   const benefitList = el("ul", "benefit-list");
   benefits.slice(0, 3).forEach(b => {
     benefitList.appendChild(el("li", "", "<span class='benefit-dot'>✦</span>" + b));
@@ -140,7 +136,7 @@ Promise.all([productsReady, currencyReady]).then(([products]) => {
     if(o.discount){
       const chips = el("div", "option-chips");
       chips.appendChild(el("span", "chip", "Save " + Math.round(o.discount * 100) + "%"));
-      chips.appendChild(el("span", "chip", "Free USA Shipping"));
+      chips.appendChild(el("span", "chip", "Free Sweden Shipping"));
       priceCol.appendChild(chips);
     }
     row.appendChild(priceCol);
@@ -182,9 +178,9 @@ Promise.all([productsReady, currencyReady]).then(([products]) => {
 
   const perks = el("div", "perk-row");
   [
-    [ICONS.box, "Free USA Shipping $30+"],
-    [ICONS.globe, "Free International Shipping $100+"],
-    [ICONS.returns, "60-Day Satisfaction Guarantee"]
+    [ICONS.box, "Free Sweden Shipping $30+"],
+    [ICONS.globe, "Free International Shipping $150+"],
+    [ICONS.support, "24/7 Customer Support"]
   ].forEach(([icon, text]) => {
     const perk = el("div", "perk");
     perk.appendChild(el("div", "perk-icon", icon));
@@ -196,4 +192,125 @@ Promise.all([productsReady, currencyReady]).then(([products]) => {
   root.innerHTML = "";
   root.appendChild(gallery);
   root.appendChild(details);
+
+  /* ---------- Reviews ---------- */
+  const reviewsRoot = document.getElementById("reviewsSection");
+
+  function starPicker(initial){
+    const wrap = el("div", "star-picker");
+    let value = initial || 0;
+    const stars = [];
+    for(let i = 1; i <= 5; i++){
+      const s = el("button", "star-pick", "★");
+      s.type = "button";
+      s.setAttribute("aria-label", i + " star" + (i > 1 ? "s" : ""));
+      s.addEventListener("click", () => { value = i; paint(); });
+      stars.push(s);
+      wrap.appendChild(s);
+    }
+    function paint(){ stars.forEach((s, idx) => s.classList.toggle("on", idx < value)); }
+    paint();
+    wrap.getValue = () => value;
+    return wrap;
+  }
+
+  function renderReviewList(listBox, reviews){
+    listBox.innerHTML = "";
+    if(reviews.length === 0){
+      listBox.appendChild(el("div", "reviews-empty", "No reviews yet — be the first."));
+      return;
+    }
+    reviews.forEach(r => {
+      let stars = "";
+      for(let i = 1; i <= 5; i++){
+        stars += '<span class="star' + (i <= r.rating ? " filled" : "") + '">★</span>';
+      }
+      const row = el("div", "review-row");
+      row.appendChild(el("div", "review-row-top",
+        '<span class="stars">' + stars + "</span>" +
+        "<span class='review-author'></span><span class='review-date'>" + r.createdAt.split(" ")[0] + "</span>"));
+      row.querySelector(".review-author").textContent = r.author;
+      if(r.body){
+        const bodyEl = el("div", "review-body");
+        bodyEl.textContent = r.body;
+        row.appendChild(bodyEl);
+      }
+      listBox.appendChild(row);
+    });
+  }
+
+  async function renderReviews(){
+    reviewsRoot.innerHTML = "";
+    const head = el("h2", "reviews-title", "Reviews");
+    reviewsRoot.appendChild(head);
+
+    const listBox = el("div", "reviews-list", "Loading…");
+    reviewsRoot.appendChild(listBox);
+
+    let reviews = [];
+    try {
+      reviews = await apiReviews(product.slug);
+    } catch(e){
+      listBox.textContent = "Reviews need the backend running.";
+      return;
+    }
+    head.textContent = "Reviews (" + reviews.length + ")";
+    renderReviewList(listBox, reviews);
+
+    // Form area — only shown to signed-in customers who bought this item.
+    const formArea = el("div", "review-form-area");
+    reviewsRoot.appendChild(formArea);
+
+    let eligibility;
+    try { eligibility = await apiCanReview(product.slug); }
+    catch(e){ return; }
+
+    if(!eligibility.canReview){
+      const note = eligibility.reason === "signin"
+        ? "Sign in to leave a review — only verified buyers can post."
+        : "Only customers who bought this item can leave a review.";
+      formArea.appendChild(el("p", "review-gate", note));
+      return;
+    }
+
+    const own = eligibility.own;
+    formArea.appendChild(el("h3", "review-form-title", own ? "Update your review" : "Leave a review"));
+
+    const picker = starPicker(own ? own.rating : 0);
+    formArea.appendChild(picker);
+
+    const textarea = el("textarea", "review-input");
+    textarea.placeholder = "What did you think? (optional)";
+    textarea.maxLength = 1000;
+    if(own && own.body) textarea.value = own.body;
+    formArea.appendChild(textarea);
+
+    const error = el("div", "auth-error");
+    formArea.appendChild(error);
+
+    const submit = el("button", "auth-submit review-submit", own ? "Update review" : "Post review");
+    submit.type = "button";
+    submit.addEventListener("click", async () => {
+      error.textContent = "";
+      if(picker.getValue() < 1){
+        error.textContent = "Pick a star rating first.";
+        return;
+      }
+      submit.disabled = true;
+      try {
+        const summary = await apiPostReview(product.slug, picker.getValue(), textarea.value.trim());
+        showToast("Thanks for your review!");
+        // Update the stars in the product header with the new average.
+        ratingRow.innerHTML = starsMarkup(summary.rating, summary.reviews) +
+          '<span class="review-label">' + summary.reviews + " reviews</span>";
+        renderReviews();
+      } catch(e){
+        error.textContent = e.message;
+        submit.disabled = false;
+      }
+    });
+    formArea.appendChild(submit);
+  }
+
+  renderReviews();
 });

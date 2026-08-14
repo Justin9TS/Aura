@@ -49,7 +49,7 @@ const crypto = require("crypto");
 const db = require("./db.js");
 const { PACK_OPTIONS, linePriceCents } = require("./pricing.js");
 const { hashPassword, verifyPassword, DUMMY_HASH, newSessionToken, hashToken } = require("./auth.js");
-const { notifyOrderDiscord, emailEnabled, sendCodeEmail } = require("./notify.js");
+const { notifyOrderDiscord, emailEnabled, sendCodeEmail, sendDiscountLink } = require("./notify.js");
 const currency = require("./currency.js");
 const { countryForRequest } = require("./geo.js");
 
@@ -431,6 +431,94 @@ app.get("/api/auth/me", (req, res) => {
 
 app.get("/api/orders", requireAuth, (req, res) => {
   res.json(db.listOrdersForUser(req.user.userId));
+});
+
+/* ---------- discount signup (email + phone, verified by link) ---------- */
+const discountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 15,
+  standardHeaders: "draft-7", legacyHeaders: false,
+  message: { error: "Too many attempts, try again in a few minutes." }
+});
+
+const PHONE_RE = /^[+0-9][0-9 ()\-]{5,19}$/;
+const DISCOUNT_TOKEN_TTL_MS = 10 * 60 * 1000; // links last 10 minutes
+const DISCOUNT_CODE = "AURA15";
+
+app.post("/api/discount/send", discountLimiter, async (req, res) => {
+  if(tripsHoneypot(req)) return res.status(400).json({ error: "Enter a valid email address." });
+  const email = normalizeEmail(req.body && req.body.email);
+  if(!email) return res.status(400).json({ error: "Enter a valid email address." });
+  const phone = String((req.body && req.body.phone) || "").trim();
+  if(!PHONE_RE.test(phone)) return res.status(400).json({ error: "Enter a valid phone number." });
+  if(!emailEnabled()) return res.status(400).json({ error: "Email isn't configured on the server yet." });
+
+  const token = crypto.randomBytes(24).toString("hex");
+  db.upsertSubscriber(email, phone, hashToken(token), Date.now() + DISCOUNT_TOKEN_TTL_MS);
+
+  const origin = req.protocol + "://" + req.get("host");
+  try {
+    await sendDiscountLink(email, origin + "/discount-verified.html?token=" + token);
+  } catch(e){
+    console.error("Discount email failed:", e.message);
+    return res.status(502).json({ error: "Couldn't send the email, try again." });
+  }
+  res.json({ ok: true });
+});
+
+// The page the emailed link opens posts its token here.
+app.post("/api/discount/verify", (req, res) => {
+  const token = String((req.body && req.body.token) || "");
+  if(!/^[a-f0-9]{48}$/.test(token)) return res.status(400).json({ error: "Invalid or expired link." });
+  const email = db.verifySubscriberToken(hashToken(token));
+  if(!email) return res.status(400).json({ error: "Invalid or expired link." });
+  res.json({ ok: true, email });
+});
+
+app.post("/api/discount/continue", discountLimiter, (req, res) => {
+  const email = normalizeEmail(req.body && req.body.email);
+  if(!email) return res.status(400).json({ error: "Enter a valid email address." });
+  const sub = db.getSubscriber(email);
+  if(!sub || !sub.verified){
+    return res.status(403).json({ error: "You have not verified yet." });
+  }
+  res.json({ ok: true, code: DISCOUNT_CODE });
+});
+
+/* ---------- reviews ---------- */
+app.get("/api/products/:slug/reviews", (req, res) => {
+  const slug = String(req.params.slug || "");
+  if(!SLUG_RE.test(slug)) return res.status(400).json({ error: "Invalid product id." });
+  if(!db.getProductRow(slug)) return res.status(404).json({ error: "Product not found." });
+  res.json(db.listReviews(slug));
+});
+
+// Tells the product page whether to show the review form: signed in,
+// bought this product, and whether a review already exists to edit.
+app.get("/api/products/:slug/can-review", (req, res) => {
+  const slug = String(req.params.slug || "");
+  if(!SLUG_RE.test(slug)) return res.status(400).json({ error: "Invalid product id." });
+  if(!req.user) return res.json({ canReview: false, reason: "signin" });
+  if(!db.userHasPurchased(req.user.userId, slug)){
+    return res.json({ canReview: false, reason: "notBought" });
+  }
+  res.json({ canReview: true, own: db.getOwnReview(slug, req.user.userId) });
+});
+
+app.post("/api/products/:slug/reviews", requireAuth, (req, res) => {
+  const slug = String(req.params.slug || "");
+  if(!SLUG_RE.test(slug)) return res.status(400).json({ error: "Invalid product id." });
+  if(!db.getProductRow(slug)) return res.status(404).json({ error: "Product not found." });
+  // Server-side purchase check — the form being hidden isn't security.
+  if(!db.userHasPurchased(req.user.userId, slug)){
+    return res.status(403).json({ error: "Only customers who bought this item can review it." });
+  }
+  const rating = req.body && req.body.rating;
+  if(!Number.isInteger(rating) || rating < 1 || rating > 5){
+    return res.status(400).json({ error: "Rating must be 1 to 5 stars." });
+  }
+  const body = String((req.body && req.body.body) || "").trim().slice(0, 1000);
+  const summary = db.saveReview(slug, req.user.userId, rating, body);
+  res.status(201).json(summary);
 });
 
 /* ---------- product routes ---------- */

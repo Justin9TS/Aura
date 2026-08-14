@@ -53,6 +53,26 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS subscribers (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT UNIQUE NOT NULL,
+    phone         TEXT,
+    verified      INTEGER NOT NULL DEFAULT 0,
+    token_hash    TEXT,
+    token_expires INTEGER,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS reviews (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_slug TEXT NOT NULL,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rating       INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    body         TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (product_slug, user_id)
+  );
+
   CREATE TABLE IF NOT EXISTS email_codes (
     email      TEXT NOT NULL,
     purpose    TEXT NOT NULL CHECK (purpose IN ('verify', 'reset')),
@@ -235,6 +255,84 @@ function markUserVerified(email){ userVerifyStmt.run(email); }
 function updateUserPassword(userId, passwordHash){ userPasswordStmt.run(passwordHash, userId); }
 function deleteSessionsForUser(userId){ sessionsForUserStmt.run(userId); }
 
+/* ---------- discount subscribers ---------- */
+const subUpsertStmt = db.prepare(`
+  INSERT INTO subscribers (email, phone, token_hash, token_expires)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT(email) DO UPDATE SET phone = excluded.phone,
+    token_hash = excluded.token_hash, token_expires = excluded.token_expires
+`);
+const subByEmailStmt = db.prepare("SELECT * FROM subscribers WHERE email = ?");
+const subByTokenStmt = db.prepare("SELECT * FROM subscribers WHERE token_hash = ?");
+const subVerifyStmt = db.prepare("UPDATE subscribers SET verified = 1, token_hash = NULL, token_expires = NULL WHERE id = ?");
+
+function upsertSubscriber(email, phone, tokenHash, tokenExpires){
+  subUpsertStmt.run(email, phone || null, tokenHash, tokenExpires);
+}
+function getSubscriber(email){ return subByEmailStmt.get(email) || null; }
+
+// Returns the subscriber's email when the token is valid, else null.
+function verifySubscriberToken(tokenHash){
+  const row = subByTokenStmt.get(tokenHash);
+  if(!row || !row.token_expires || row.token_expires < Date.now()) return null;
+  subVerifyStmt.run(row.id);
+  return row.email;
+}
+
+/* ---------- reviews ---------- */
+const reviewListStmt = db.prepare(`
+  SELECT r.rating, r.body, r.created_at, u.email
+  FROM reviews r JOIN users u ON u.id = r.user_id
+  WHERE r.product_slug = ? ORDER BY r.id DESC LIMIT 100
+`);
+const reviewMineStmt = db.prepare("SELECT rating, body FROM reviews WHERE product_slug = ? AND user_id = ?");
+const reviewUpsertStmt = db.prepare(`
+  INSERT INTO reviews (product_slug, user_id, rating, body) VALUES (?, ?, ?, ?)
+  ON CONFLICT(product_slug, user_id) DO UPDATE SET rating = excluded.rating,
+    body = excluded.body, created_at = datetime('now')
+`);
+const reviewRollupStmt = db.prepare(`
+  UPDATE products SET
+    rating  = COALESCE((SELECT AVG(rating) FROM reviews WHERE product_slug = ?), 0),
+    reviews = (SELECT COUNT(*) FROM reviews WHERE product_slug = ?)
+  WHERE slug = ?
+`);
+const purchasesStmt = db.prepare("SELECT items_json FROM orders WHERE user_id = ? AND status IN ('paid','demo')");
+
+function maskEmail(email){
+  const at = email.indexOf("@");
+  return email.slice(0, Math.min(2, at)) + "***" + email.slice(at);
+}
+
+function listReviews(slug){
+  return reviewListStmt.all(slug).map(r => ({
+    rating: r.rating,
+    body: r.body,
+    createdAt: r.created_at,
+    author: maskEmail(r.email)
+  }));
+}
+
+function getOwnReview(slug, userId){ return reviewMineStmt.get(slug, userId) || null; }
+
+// Verified purchase = the user has an order (paid, or demo in dev mode)
+// containing this product.
+function userHasPurchased(userId, slug){
+  return purchasesStmt.all(userId).some(row => {
+    try { return JSON.parse(row.items_json).some(i => i.slug === slug); }
+    catch(e){ return false; }
+  });
+}
+
+// Saves the review and rolls the average/count up onto the product, so
+// the stars everywhere update from real reviews.
+function saveReview(slug, userId, rating, body){
+  reviewUpsertStmt.run(slug, userId, rating, body);
+  reviewRollupStmt.run(slug, slug, slug);
+  const p = getProductRow(slug);
+  return { rating: p.rating, reviews: p.reviews };
+}
+
 /* ---------- email verification / reset codes ---------- */
 const codeUpsertStmt = db.prepare(`
   INSERT INTO email_codes (email, purpose, code_hash, expires_at, attempts)
@@ -278,5 +376,7 @@ module.exports = {
   listAllOrders, adminStats,
   createUser, getUserByEmail, markUserVerified, updateUserPassword, deleteSessionsForUser,
   createSession, getSession, deleteSession, pruneExpiredSessions,
-  saveEmailCode, getEmailCode, bumpCodeAttempts, deleteEmailCode
+  saveEmailCode, getEmailCode, bumpCodeAttempts, deleteEmailCode,
+  upsertSubscriber, getSubscriber, verifySubscriberToken,
+  listReviews, getOwnReview, userHasPurchased, saveReview
 };

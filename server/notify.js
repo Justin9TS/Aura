@@ -133,4 +133,22 @@ async function sendCodeEmail(to, code, purpose){
   }
 }
 
-module.exports = { notifyOrderDiscord, emailEnabled, sendCodeEmail };
+// Emails the 10-minute discount verification link.
+async function sendDiscountLink(to, link){
+  const subject = "Verify your email — 15% off at Aura";
+  const text = "Click to verify your email and unlock 15% off:\n\n" + link +
+    "\n\nThe link expires in 10 minutes. If you didn't request this, ignore this email.";
+
+  if(transporter){
+    await transporter.sendMail({
+      from: process.env.MAIL_FROM || process.env.SMTP_USER,
+      to, subject, text
+    });
+  } else if(EMAIL_DEBUG){
+    console.log(`[EMAIL_DEBUG] discount link for ${to}: ${link}`);
+  } else {
+    throw new Error("Email is not configured.");
+  }
+}
+
+module.exports = { notifyOrderDiscord, emailEnabled, sendCodeEmail, sendDiscountLink };
