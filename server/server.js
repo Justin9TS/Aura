@@ -49,8 +49,19 @@ const db = require("./db.js");
 const { PACK_OPTIONS, linePriceCents } = require("./pricing.js");
 const { hashPassword, verifyPassword, DUMMY_HASH, newSessionToken, hashToken } = require("./auth.js");
 
+// On networks that require an outbound proxy (corporate/cloud), route
+// Stripe API calls through it. No-op when HTTPS_PROXY isn't set.
+let stripeHttpAgent;
+const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
+if(proxyUrl){
+  try {
+    const { HttpsProxyAgent } = require("https-proxy-agent");
+    stripeHttpAgent = new HttpsProxyAgent(proxyUrl);
+  } catch(e){ /* https-proxy-agent not installed — direct connection */ }
+}
+
 const stripe = process.env.STRIPE_SECRET_KEY
-  ? require("stripe")(process.env.STRIPE_SECRET_KEY)
+  ? require("stripe")(process.env.STRIPE_SECRET_KEY, stripeHttpAgent ? { httpAgent: stripeHttpAgent } : {})
   : null;
 
 const app = express();
@@ -283,6 +294,10 @@ app.post("/api/checkout", checkoutLimiter, async (req, res) => {
     const origin = req.protocol + "://" + req.get("host");
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      // Newer Stripe accounts enable "Managed Payments" by default, which
+      // only allows a narrow list of product tax categories. This store
+      // uses standard payments (you are the merchant), so opt out here.
+      managed_payments: { enabled: false },
       line_items: validated.map(item => ({
         quantity: item.qty,
         price_data: {
