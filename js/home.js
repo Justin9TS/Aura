@@ -3,23 +3,23 @@
 
 "use strict";
 
-(function(){
+productsReady.then(products => {
   const container = document.getElementById("products");
   container.innerHTML = "";
 
-  if(PRODUCTS.length === 0){
+  if(products.length === 0){
     container.appendChild(el("div", "empty-note", "No products yet. Add one in PRODUCTS in js/data.js."));
     return;
   }
 
   // Auto-sort: alphabetical by name, every time the page renders.
-  const sorted = PRODUCTS.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = products.slice().sort((a, b) => a.name.localeCompare(b.name));
 
   sorted.forEach((p, i) => {
     const card = el("div", "card card-link");
     card.style.animationDelay = (i * 45) + "ms";
 
-    const url = "product.html?p=" + slugify(p.name);
+    const url = "product.html?p=" + p.slug;
     card.addEventListener("click", () => { window.location.href = url; });
 
     const image = el("div", "card-image", PLACEHOLDER_ICON);
@@ -36,7 +36,7 @@
     btn.type = "button";
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      addToCart({ id: p.name, name: p.name, price: p.price });
+      addToCart({ slug: p.slug, option: "single", name: p.name, price: p.price });
       bumpCartButton();
       showToast("Added: " + p.name);
     });
@@ -46,4 +46,4 @@
     card.appendChild(info);
     container.appendChild(card);
   });
-})();
+});

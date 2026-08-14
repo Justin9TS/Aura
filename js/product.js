@@ -1,15 +1,18 @@
 /* Product detail page: reads ?p=<slug> from the URL, looks the product
-   up in PRODUCTS (js/data.js) and renders the page. Every product gets
-   three purchase options built from its base price:
+   up in the catalog and renders the page. Every product gets three
+   purchase options built from its base price:
      Single    -> 1x price
      Two Pack  -> 2x price, 10% off  (Most popular)
-     Trio Pack -> 3x price, 15% off  (Best value)  */
+     Trio Pack -> 3x price, 15% off  (Best value)
+   The same option table lives in server/pricing.js — the server is the
+   authority at checkout, this one only drives the display. */
 
 "use strict";
 
-(function(){
+productsReady.then(products => {
   const params = new URLSearchParams(window.location.search);
-  const product = findProductBySlug(params.get("p") || "");
+  const slug = params.get("p") || "";
+  const product = products.find(p => p.slug === slug) || null;
 
   const root = document.getElementById("productPage");
 
@@ -35,7 +38,7 @@
 
   let selectedOption = OPTIONS[0];
 
-  const benefits = product.benefits || [
+  const benefits = product.benefits && product.benefits.length ? product.benefits : [
     "Made to fit the rest of your Aura setup",
     "Free 60-day returns, no questions asked",
     "Ships in plain recyclable packaging"
@@ -97,7 +100,7 @@
   details.appendChild(ratingRow);
 
   const setPill = el("div", "set-pill",
-    "🎁 <strong>Build Your Own Set:</strong> save up to 20% + get 3 free gifts");
+    ICONS.gift + " <strong>Build Your Own Set:</strong> save up to 20% + get 3 free gifts");
   details.appendChild(setPill);
 
   const benefitList = el("ul", "benefit-list");
@@ -154,7 +157,8 @@
   addBtn.addEventListener("click", () => {
     const isSingle = selectedOption.packOf === 1;
     addToCart({
-      id: isSingle ? product.name : product.name + " — " + selectedOption.label,
+      slug: product.slug,
+      option: selectedOption.key,
       name: isSingle ? product.name : product.name + " (" + selectedOption.label + ")",
       price: selectedOption.price
     });
@@ -171,15 +175,16 @@
   selectOption(selectedOption);
 
   const setBox = el("div", "set-box",
-    "🎁 <strong>Build Your Own Set</strong> <span class='set-highlight'>Save up to 20% + 3 free gifts</span>" +
+    "<div class='set-box-title'>" + ICONS.gift + " <strong>Build Your Own Set</strong> " +
+    "<span class='set-highlight'>Save up to 20% + 3 free gifts</span></div>" +
     "<small>Pick your routine, unlock up to 20% off, and get 3 free gifts at 4 items.</small>");
   details.appendChild(setBox);
 
   const perks = el("div", "perk-row");
   [
-    ["📦", "Free USA Shipping $30+"],
-    ["🌍", "Free International Shipping $100+"],
-    ["↩️", "60-Day Satisfaction Guarantee"]
+    [ICONS.box, "Free USA Shipping $30+"],
+    [ICONS.globe, "Free International Shipping $100+"],
+    [ICONS.returns, "60-Day Satisfaction Guarantee"]
   ].forEach(([icon, text]) => {
     const perk = el("div", "perk");
     perk.appendChild(el("div", "perk-icon", icon));
@@ -191,4 +196,4 @@
   root.innerHTML = "";
   root.appendChild(gallery);
   root.appendChild(details);
-})();
+});

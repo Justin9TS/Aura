@@ -7,10 +7,20 @@
 "use strict";
 
 const FREE_SHIPPING_THRESHOLD = 150;
-const CART_STORAGE_KEY = "aura-cart-v1";
+const CART_STORAGE_KEY = "aura-cart-v2";
 
 // Faint placeholder icon shown until a real product photo is added.
 const PLACEHOLDER_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="#4B82E8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+
+// Small inline SVG icon set (stroke style matches the rest of the site).
+// Use like: ICONS.gift — colored via CSS `color` (stroke:currentColor).
+const ICONS = {
+  gift: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>',
+  box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  returns: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 7v5l3 3"/></svg>',
+  check: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>'
+};
 
 function fmtPrice(n){ return "$" + n.toFixed(2); }
 function fmtMoney(n){
@@ -42,7 +52,7 @@ function showToast(msg){
   t.textContent = msg;
   t.classList.add("show");
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => t.classList.remove("show"), 2000);
+  showToast._t = setTimeout(() => t.classList.remove("show"), 2400);
 }
 
 /* ---------- Inject shared chrome ---------- */
@@ -58,27 +68,6 @@ const CHROME_HEADER = `
       <button class="nav-tab" type="button">Tab1</button>
       <button class="nav-tab" type="button">Tab2</button>
       <button class="nav-tab" type="button">Tab 3</button>
-
-      <div class="mega-menu" id="megaMenu">
-        <div class="mega-inner">
-          <div class="mega-col">
-            <h3>Shop</h3>
-            <ul>
-              <li><a href="#">Shop 1</a></li>
-              <li><a href="#">Shop 2</a></li>
-              <li><a href="#">Shop 3</a></li>
-              <li><a href="#">Shop 4</a></li>
-            </ul>
-          </div>
-          <div class="mega-col mega-products">
-            <h3>Products</h3>
-            <ul id="megaProductList"></ul>
-          </div>
-          <div class="mega-col">
-            <div class="mega-image">${PLACEHOLDER_ICON}</div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div class="nav-right">
@@ -88,6 +77,43 @@ const CHROME_HEADER = `
       <button class="cart-btn" id="cartBtn" type="button" aria-label="Cart">
         Cart <span id="cartCount">0</span>
       </button>
+    </div>
+  </div>
+
+  <div class="mega-menu" id="megaMenu">
+    <div class="mega-inner">
+      <div class="mega-col">
+        <h3>Shop</h3>
+        <ul>
+          <li><a href="index.html">All Products</a></li>
+          <li><a href="#">Home</a></li>
+          <li><a href="#">Kitchen</a></li>
+          <li><a href="#">Wellness</a></li>
+          <li><a href="#">Stationery</a></li>
+          <li><a href="#">Bags</a></li>
+        </ul>
+      </div>
+      <div class="mega-col mega-products">
+        <h3>Products</h3>
+        <ul id="megaProductList"></ul>
+        <a class="mega-view-all" href="index.html">View all products →</a>
+      </div>
+      <div class="mega-col">
+        <h3>Featured</h3>
+        <a class="mega-feature" href="index.html">
+          <div class="mega-image">${PLACEHOLDER_ICON}</div>
+          <span class="mega-feature-title">New arrivals</span>
+          <span class="mega-feature-sub">Fresh picks for your setup</span>
+        </a>
+      </div>
+      <div class="mega-col">
+        <h3>Deals</h3>
+        <a class="mega-feature" href="index.html">
+          <div class="mega-image">${PLACEHOLDER_ICON}</div>
+          <span class="mega-feature-title">Save up to 15%</span>
+          <span class="mega-feature-sub">Follow us on TikTok &amp; Youtube</span>
+        </a>
+      </div>
     </div>
   </div>
 </header>`;
@@ -163,7 +189,9 @@ document.body.insertAdjacentHTML("beforeend", CHROME_FOOTER);
 
 /* ---------- Cart (persisted in localStorage) ---------- */
 
-// cart: array of { id, name, price, qty, addedAt }
+// cart: array of { id, slug, option, name, price, qty, addedAt }
+// `slug` + `option` are what the backend uses to re-price everything at
+// checkout — the client-side `price` is only for display.
 let cart = loadCart();
 
 function loadCart(){
@@ -180,16 +208,19 @@ function saveCart(){
   try { localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart)); } catch(e){ /* private mode etc. */ }
 }
 
-// Adds a line to the cart. `entry` needs { id, name, price }; qty defaults to 1.
+// Adds a line to the cart. `entry` needs { slug, option, name, price }.
 function addToCart(entry, qty){
   qty = qty || 1;
-  const existing = cart.find(item => item.id === entry.id);
+  const id = entry.slug + ":" + entry.option;
+  const existing = cart.find(item => item.id === id);
   if(existing){
     existing.qty += qty;
     existing.addedAt = Date.now();
   } else {
     cart.push({
-      id: entry.id,
+      id: id,
+      slug: entry.slug,
+      option: entry.option,
       name: entry.name,
       price: entry.price,
       qty: qty,
@@ -210,6 +241,12 @@ function changeQty(id, delta){
 
 function removeItem(id){
   cart = cart.filter(i => i.id !== id);
+  saveCart();
+  renderCart();
+}
+
+function clearCart(){
+  cart = [];
   saveCart();
   renderCart();
 }
@@ -237,7 +274,7 @@ function renderCart(){
   const pct = Math.min(100, (subtotal / FREE_SHIPPING_THRESHOLD) * 100);
   const shipText = document.getElementById("shipText");
   if(remaining <= 0){
-    shipText.textContent = "You've unlocked FREE SHIPPING 🎉";
+    shipText.innerHTML = "You've unlocked FREE SHIPPING " + ICONS.check;
     shipText.classList.add("unlocked");
   } else {
     shipText.textContent = "Add " + fmtMoney(remaining) + " to unlock FREE SHIPPING";
@@ -333,26 +370,46 @@ document.getElementById("discountCloseBtn").addEventListener("click", closeAllPa
 overlay.addEventListener("click", closeAllPanels);
 document.addEventListener("keydown", (e) => { if(e.key === "Escape") closeAllPanels(); });
 
-document.getElementById("checkoutBtn").addEventListener("click", () => {
+/* ---------- Checkout ---------- */
+// Sends only { slug, option, qty } — the server looks prices up in the
+// database, so tampering with client-side prices changes nothing.
+document.getElementById("checkoutBtn").addEventListener("click", async () => {
   if(cart.length === 0) return;
-  showToast("Heading to checkout — " + fmtPrice(cartTotals().subtotal) + " total.");
+  const btn = document.getElementById("checkoutBtn");
+  btn.disabled = true;
+  btn.textContent = "Processing…";
+  try {
+    const order = await apiCheckout(cart.map(i => ({ slug: i.slug, option: i.option, qty: i.qty })));
+    clearCart();
+    closeAllPanels();
+    showToast("Order #" + order.orderId + " placed — " + fmtPrice(order.subtotal) + " total. (Payment comes later.)");
+  } catch(e){
+    showToast(e.message.indexOf("fetch") !== -1 || e instanceof TypeError
+      ? "No backend running — start it with: npm start"
+      : e.message);
+  } finally {
+    btn.textContent = "Continue to checkout";
+    renderCart();
+  }
 });
 
 /* ---------- Shop mega-menu ---------- */
 const shopBtn = document.getElementById("shopBtn");
 const megaMenu = document.getElementById("megaMenu");
 
-const megaProductList = document.getElementById("megaProductList");
-PRODUCTS.slice()
-  .sort((a, b) => a.name.localeCompare(b.name))
-  .forEach(p => {
-    const li = document.createElement("li");
-    const a = document.createElement("a");
-    a.href = "product.html?p=" + slugify(p.name);
-    a.textContent = p.name;
-    li.appendChild(a);
-    megaProductList.appendChild(li);
-  });
+productsReady.then(products => {
+  const megaProductList = document.getElementById("megaProductList");
+  products.slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .forEach(p => {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = "product.html?p=" + p.slug;
+      a.textContent = p.name;
+      li.appendChild(a);
+      megaProductList.appendChild(li);
+    });
+});
 
 function toggleMegaMenu(force){
   const show = force !== undefined ? force : !megaMenu.classList.contains("show");

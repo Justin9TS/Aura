@@ -1,0 +1,22 @@
+{
+  "name": "aura",
+  "version": "1.0.0",
+  "description": "Aura store — static frontend + Express/SQLite backend",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Justin9TS/Aura.git"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.6.2",
+    "helmet": "^8.3.0"
+  }
+}

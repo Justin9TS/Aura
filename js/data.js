@@ -47,3 +47,8 @@ function slugify(name){
 function findProductBySlug(slug){
   return PRODUCTS.find(p => slugify(p.name) === slug) || null;
 }
+
+// Lets the Node backend reuse this same file to seed the database.
+if(typeof module !== "undefined" && module.exports){
+  module.exports = { PRODUCTS, slugify };
+}

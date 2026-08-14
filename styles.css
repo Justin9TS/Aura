@@ -177,7 +177,7 @@ header{
   position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
   background:var(--ink); color:#fff; padding:12px 20px; border-radius:8px;
   font-size:13.5px; font-weight:500; box-shadow:0 10px 30px rgba(0,0,0,0.2);
-  opacity:0; pointer-events:none; transition: all .25s ease; z-index:100;
+  opacity:0; pointer-events:none; transition: all .25s ease; z-index:300;
 }
 .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 
@@ -214,14 +214,14 @@ header{
 /* ---------- SHARED OVERLAY ---------- */
 .ui-overlay{
   position:fixed; inset:0; background:rgba(28,36,49,0.32);
-  opacity:0; pointer-events:none; transition: opacity .3s ease; z-index:150;
+  opacity:0; pointer-events:none; transition: opacity .3s ease; z-index:240;
 }
 .ui-overlay.show{ opacity:1; pointer-events:auto; }
 
 /* ---------- CART DRAWER ---------- */
 .cart-drawer{
   position:fixed; top:0; right:0; height:100%; width:400px; max-width:92vw;
-  background:var(--white); z-index:151;
+  background:var(--white); z-index:250;
   box-shadow: -12px 0 40px rgba(28,36,49,0.18);
   transform:translateX(100%); transition: transform .35s ease;
   display:flex; flex-direction:column;
@@ -312,7 +312,10 @@ header{
 .checkout-btn:disabled{ background:#c8d6ef; cursor:not-allowed; transform:none; }
 
 /* ---------- NAV: SHOP DROPDOWN + TABS ---------- */
-.nav-left{ display:flex; align-items:center; gap:6px; position:relative; }
+/* .nav-left is intentionally NOT position:relative — the mega menu is
+   absolutely positioned against the sticky header so it spans the full
+   viewport width. */
+.nav-left{ display:flex; align-items:center; gap:6px; }
 .shop-btn,
 .nav-tab{
   display:flex; align-items:center; gap:6px;
@@ -339,30 +342,41 @@ header{
 }
 .mega-menu.show{ opacity:1; transform:translateY(0); pointer-events:auto; }
 .mega-inner{
-  max-width:1080px; margin:0 auto; padding:32px 24px 40px;
-  display:grid; grid-template-columns: 1fr 1.6fr 1.4fr; gap:36px;
+  max-width:1280px; margin:0 auto; padding:44px 32px 52px;
+  display:grid; grid-template-columns: 0.9fr 2.2fr 1.1fr 1.1fr; gap:48px;
+}
+@media (max-width: 900px){
+  .mega-inner{ grid-template-columns:1fr 1fr; gap:28px; padding:28px 24px 36px; }
 }
 .mega-col h3{
-  font-size:11px; text-transform:uppercase; letter-spacing:0.08em;
-  color:var(--ink-soft); font-weight:700; margin-bottom:14px;
+  font-size:11.5px; text-transform:uppercase; letter-spacing:0.1em;
+  color:var(--ink-soft); font-weight:700; margin-bottom:16px;
 }
-.mega-col ul{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:11px; }
+.mega-col ul{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px; }
 .mega-col a{
-  text-decoration:none; color:var(--ink); font-size:14px; font-weight:500;
+  text-decoration:none; color:var(--ink); font-size:14.5px; font-weight:500;
   transition: color .15s ease;
 }
 .mega-col a:hover{ color:var(--sky-deep); }
 .mega-products ul{
-  display:grid; grid-template-columns:1fr 1fr; gap:10px 20px;
+  display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px 24px;
+}
+.mega-view-all{
+  display:inline-block; margin-top:16px;
+  font-size:13px; font-weight:700; color:var(--sky-deep) !important;
 }
 .mega-image{
-  width:100%; aspect-ratio: 16 / 10;
+  width:100%; aspect-ratio: 16 / 11;
   border-radius:14px;
   background: linear-gradient(150deg, var(--sky-pale), #ffffff);
   border:1px solid var(--line);
   display:flex; align-items:center; justify-content:center;
 }
 .mega-image svg{ width:44px; height:44px; opacity:0.25; }
+.mega-feature{ display:flex; flex-direction:column; gap:10px; text-decoration:none; }
+.mega-feature:hover .mega-image{ border-color:var(--sky); }
+.mega-feature-title{ font-size:13.5px; font-weight:700; color:var(--ink); }
+.mega-feature-sub{ font-size:12px; color:var(--ink-soft); }
 
 /* ---------- NAV: ACCOUNT BUTTON ---------- */
 .nav-right{ display:flex; align-items:center; gap:10px; }
@@ -378,7 +392,7 @@ header{
 
 .account-drawer{
   position:fixed; top:0; right:0; height:100%; width:380px; max-width:92vw;
-  background:var(--white); z-index:151;
+  background:var(--white); z-index:250;
   box-shadow: -12px 0 40px rgba(28,36,49,0.18);
   transform:translateX(100%); transition: transform .35s ease;
   display:flex; flex-direction:column;
@@ -417,7 +431,7 @@ header{
 }
 
 .discount-modal{
-  position:fixed; top:50%; left:50%; z-index:151;
+  position:fixed; top:50%; left:50%; z-index:250;
   width:420px; max-width:90vw; min-height:280px;
   background:var(--white); border-radius:18px;
   box-shadow: 0 30px 70px rgba(28,36,49,0.28);
@@ -625,3 +639,10 @@ footer .foot-links a:hover{ color:var(--sky-deep); text-decoration:underline; }
   box-shadow:var(--shadow);
 }
 .perk-text{ font-size:12px; font-weight:600; color:var(--ink-soft); max-width:16ch; }
+
+/* ---------- INLINE SVG ICONS (replace emojis) ---------- */
+.icon-svg{ width:16px; height:16px; flex:none; color:var(--sky-deep); vertical-align:-3px; }
+.set-pill .icon-svg{ margin-right:2px; }
+.set-box-title{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.perk-icon svg{ width:22px; height:22px; color:var(--sky-deep); }
+.cart-shipping .icon-svg{ width:15px; height:15px; }
