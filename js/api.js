@@ -27,7 +27,11 @@ async function apiRequest(method, url, body){
     body: body !== undefined ? JSON.stringify(body) : undefined
   });
   const data = await res.json().catch(() => ({}));
-  if(!res.ok) throw new Error(data.error || "Request failed (" + res.status + ")");
+  if(!res.ok){
+    const err = new Error(data.error || "Request failed (" + res.status + ")");
+    err.data = data; // some auth errors carry extra signals (verifyRequired)
+    throw err;
+  }
   return data;
 }
 
@@ -36,6 +40,10 @@ function apiConfirm(sessionId){ return apiRequest("GET", "/api/checkout/confirm?
 
 function apiRegister(email, password){ return apiRequest("POST", "/api/auth/register", { email, password }); }
 function apiLogin(email, password){ return apiRequest("POST", "/api/auth/login", { email, password }); }
+function apiVerify(email, code){ return apiRequest("POST", "/api/auth/verify", { email, code }); }
+function apiResend(email){ return apiRequest("POST", "/api/auth/resend", { email }); }
+function apiForgot(email){ return apiRequest("POST", "/api/auth/forgot", { email }); }
+function apiReset(email, code, newPassword){ return apiRequest("POST", "/api/auth/reset", { email, code, newPassword }); }
 function apiLogout(){ return apiRequest("POST", "/api/auth/logout"); }
 function apiMe(){ return apiRequest("GET", "/api/auth/me"); }
 function apiOrders(){ return apiRequest("GET", "/api/orders"); }

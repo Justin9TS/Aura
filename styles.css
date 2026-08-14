@@ -726,3 +726,9 @@ footer .foot-links a:hover{ color:var(--sky-deep); text-decoration:underline; }
   transition: background .15s ease;
 }
 .success-btn:hover{ background:#3d6fd1; }
+
+.auth-submit.secondary{
+  background:var(--white); color:var(--sky-deep);
+  border:1.5px solid var(--sky);
+}
+.auth-submit.secondary:hover{ background:var(--sky-pale); }

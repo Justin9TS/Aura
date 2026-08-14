@@ -45,9 +45,11 @@ const express = require("express");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
+const crypto = require("crypto");
 const db = require("./db.js");
 const { PACK_OPTIONS, linePriceCents } = require("./pricing.js");
 const { hashPassword, verifyPassword, DUMMY_HASH, newSessionToken, hashToken } = require("./auth.js");
+const { notifyOrderDiscord, emailEnabled, sendCodeEmail } = require("./notify.js");
 
 // On networks that require an outbound proxy (corporate/cloud), route
 // Stripe API calls through it. No-op when HTTPS_PROXY isn't set.
@@ -105,13 +107,38 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), (req,
   }
   if(event.type === "checkout.session.completed"){
     const session = event.data.object;
-    const order = db.getOrderByStripeSession(session.id);
-    if(order && session.payment_status === "paid"){
-      db.markOrderPaid(order.id);
-    }
+    if(session.payment_status === "paid") finalizePaidSession(session);
   }
   res.json({ received: true });
 });
+
+// Shared by the webhook and the success-page confirm endpoint: stores
+// customer email + shipping address on the order, marks it paid, and
+// posts the Discord log exactly once (markOrderPaid returns true only
+// on the actual transition).
+function finalizePaidSession(session){
+  const order = db.getOrderByStripeSession(session.id);
+  if(!order) return null;
+
+  const customerEmail = (session.customer_details && session.customer_details.email) || null;
+  const shipping =
+    (session.collected_information && session.collected_information.shipping_details) ||
+    session.shipping_details || null;
+
+  db.setOrderCustomer(order.id, customerEmail, shipping);
+  const justPaid = db.markOrderPaid(order.id);
+  if(justPaid){
+    notifyOrderDiscord({
+      id: order.id,
+      status: "paid",
+      subtotal_cents: order.subtotal_cents,
+      items: JSON.parse(order.items_json),
+      customerEmail,
+      shipping
+    });
+  }
+  return db.getOrderById(order.id);
+}
 
 app.use(express.json({ limit: "10kb" }));
 
@@ -126,7 +153,7 @@ const checkoutLimiter = rateLimit({
   message: { error: "Too many checkout attempts, try again later." }
 });
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, limit: 20,
+  windowMs: 15 * 60 * 1000, limit: 30,
   standardHeaders: "draft-7", legacyHeaders: false,
   message: { error: "Too many attempts, try again in a few minutes." }
 });
@@ -188,8 +215,32 @@ function validPassword(raw){
   return typeof raw === "string" && raw.length >= 8 && raw.length <= 128;
 }
 
+/* ---------- email codes (verification + password reset) ---------- */
+const CODE_TTL_MS = 15 * 60 * 1000;
+const CODE_MAX_ATTEMPTS = 5;
+const CODE_RE = /^\d{6}$/;
+
+function issueCode(email, purpose){
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+  db.saveEmailCode(email, purpose, hashToken(code), Date.now() + CODE_TTL_MS);
+  return sendCodeEmail(email, code, purpose);
+}
+
+// Constant-time check; counts attempts so codes can't be brute-forced.
+function checkCode(email, purpose, submitted){
+  if(!CODE_RE.test(String(submitted || ""))) return false;
+  const row = db.getEmailCode(email, purpose);
+  if(!row || row.expires_at < Date.now() || row.attempts >= CODE_MAX_ATTEMPTS) return false;
+  db.bumpCodeAttempts(email, purpose);
+  const a = Buffer.from(hashToken(String(submitted)));
+  const b = Buffer.from(row.code_hash);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if(ok) db.deleteEmailCode(email, purpose);
+  return ok;
+}
+
 /* ---------- auth routes ---------- */
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const email = normalizeEmail(req.body && req.body.email);
   if(!email) return res.status(400).json({ error: "Enter a valid email address." });
   if(!validPassword(req.body.password)){
@@ -198,12 +249,50 @@ app.post("/api/auth/register", (req, res) => {
   if(db.getUserByEmail(email)){
     return res.status(409).json({ error: "That email is already registered — sign in instead." });
   }
-  const userId = db.createUser(email, hashPassword(req.body.password));
+
+  // With email configured, accounts start unverified and must enter a
+  // code; without it (plain local dev), they're active immediately.
+  const needsVerification = emailEnabled();
+  const userId = db.createUser(email, hashPassword(req.body.password), !needsVerification);
+
+  if(needsVerification){
+    try { await issueCode(email, "verify"); }
+    catch(e){
+      console.error("Verification email failed:", e.message);
+      return res.status(502).json({ error: "Couldn't send the verification email, try again." });
+    }
+    return res.status(201).json({ verifyRequired: true, email });
+  }
+
   startSession(res, userId);
   res.status(201).json({ user: { email } });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/verify", (req, res) => {
+  const email = normalizeEmail(req.body && req.body.email);
+  if(!email) return res.status(400).json({ error: "Enter a valid email address." });
+  const user = db.getUserByEmail(email);
+  if(!user) return res.status(400).json({ error: "Invalid or expired code." });
+  if(!checkCode(email, "verify", req.body.code)){
+    return res.status(400).json({ error: "Invalid or expired code." });
+  }
+  db.markUserVerified(email);
+  startSession(res, user.id);
+  res.json({ user: { email } });
+});
+
+app.post("/api/auth/resend", async (req, res) => {
+  const email = normalizeEmail(req.body && req.body.email);
+  if(!email) return res.status(400).json({ error: "Enter a valid email address." });
+  const user = db.getUserByEmail(email);
+  // Same response either way — no account probing.
+  if(user && !user.verified && emailEnabled()){
+    try { await issueCode(email, "verify"); } catch(e){ console.error("Verification email failed:", e.message); }
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/login", async (req, res) => {
   const email = normalizeEmail(req.body && req.body.email);
   const password = req.body && req.body.password;
   const user = email ? db.getUserByEmail(email) : null;
@@ -212,8 +301,44 @@ app.post("/api/auth/login", (req, res) => {
   if(!user || !ok){
     return res.status(401).json({ error: "Invalid email or password." });
   }
+  if(!user.verified && emailEnabled()){
+    // Correct password but unverified — send a fresh code and bounce
+    // them to the code screen.
+    try { await issueCode(email, "verify"); } catch(e){ console.error("Verification email failed:", e.message); }
+    return res.status(403).json({ verifyRequired: true, email, error: "Check your email for a verification code." });
+  }
   startSession(res, user.id);
   res.json({ user: { email: user.email } });
+});
+
+app.post("/api/auth/forgot", async (req, res) => {
+  if(!emailEnabled()){
+    return res.status(400).json({ error: "Password reset requires email to be configured on the server." });
+  }
+  const email = normalizeEmail(req.body && req.body.email);
+  if(!email) return res.status(400).json({ error: "Enter a valid email address." });
+  // Same response whether or not the account exists — no probing.
+  if(db.getUserByEmail(email)){
+    try { await issueCode(email, "reset"); } catch(e){ console.error("Reset email failed:", e.message); }
+  }
+  res.json({ ok: true, message: "If that email has an account, a reset code is on its way." });
+});
+
+app.post("/api/auth/reset", (req, res) => {
+  const email = normalizeEmail(req.body && req.body.email);
+  if(!email) return res.status(400).json({ error: "Enter a valid email address." });
+  if(!validPassword(req.body.newPassword)){
+    return res.status(400).json({ error: "Password must be 8–128 characters." });
+  }
+  const user = db.getUserByEmail(email);
+  if(!user || !checkCode(email, "reset", req.body.code)){
+    return res.status(400).json({ error: "Invalid or expired code." });
+  }
+  db.updateUserPassword(user.id, hashPassword(req.body.newPassword));
+  db.markUserVerified(email);          // proving email ownership verifies too
+  db.deleteSessionsForUser(user.id);   // log out any stolen/old sessions
+  startSession(res, user.id);
+  res.json({ user: { email } });
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -287,6 +412,10 @@ app.post("/api/checkout", checkoutLimiter, async (req, res) => {
       userId: req.user ? req.user.userId : null,
       status: "demo"
     });
+    notifyOrderDiscord({
+      id: orderId, status: "demo", subtotal_cents: subtotalCents,
+      items: validated, customerEmail: req.user ? req.user.email : null
+    });
     return res.status(201).json({ orderId, subtotal: subtotalCents / 100, demo: true });
   }
 
@@ -307,6 +436,17 @@ app.post("/api/checkout", checkoutLimiter, async (req, res) => {
         }
       })),
       customer_email: req.user ? req.user.email : undefined,
+      // Stripe collects the shipping address on its payment page; it's
+      // saved onto the order once the payment is confirmed. Add/remove
+      // countries here to control where you ship.
+      shipping_address_collection: {
+        allowed_countries: [
+          "SE", "NO", "DK", "FI", "IS",
+          "US", "CA", "GB", "IE", "AU", "NZ",
+          "DE", "FR", "NL", "BE", "AT", "CH", "ES", "IT", "PT",
+          "PL", "CZ", "EE", "LV", "LT", "JP"
+        ]
+      },
       success_url: origin + "/checkout-success.html?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: origin + "/index.html"
     });
@@ -337,7 +477,7 @@ app.get("/api/checkout/confirm", async (req, res) => {
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if(session.payment_status === "paid"){
-      db.markOrderPaid(order.id);
+      finalizePaidSession(session);
       return res.json({ orderId: order.id, subtotal: order.subtotal_cents / 100, status: "paid" });
     }
     res.json({ orderId: order.id, subtotal: order.subtotal_cents / 100, status: order.status });
@@ -363,4 +503,10 @@ app.listen(PORT, () => {
   console.log(stripe
     ? "Stripe payments: ENABLED"
     : "Stripe payments: not configured (demo checkout) — add STRIPE_SECRET_KEY to .env to enable");
+  console.log(process.env.DISCORD_WEBHOOK_URL
+    ? "Discord order log: ENABLED"
+    : "Discord order log: not configured — add DISCORD_WEBHOOK_URL to .env to enable");
+  console.log(emailEnabled()
+    ? "Email verification: ENABLED" + (process.env.SMTP_HOST ? " (SMTP)" : " (EMAIL_DEBUG — codes print here)")
+    : "Email verification: off — accounts activate instantly (configure SMTP_* or EMAIL_DEBUG=1 in .env)");
 });

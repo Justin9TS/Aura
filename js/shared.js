@@ -429,9 +429,13 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if(e.key === "Escape") toggleMegaMenu(false); });
 
-/* ---------- Account panel (sign in / register / order history) ---------- */
+/* ---------- Account panel ---------- */
+// Modes: login, register, verify (enter emailed code), forgot (reset
+// password with emailed code). `pendingEmail` carries the address
+// between the register/login step and the code step.
 const ACCOUNT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>';
-let authMode = "login"; // or "register"
+let authMode = "login";
+let pendingEmail = "";
 
 async function refreshAccountPanel(){
   const body = document.getElementById("accountBody");
@@ -453,63 +457,152 @@ async function refreshAccountPanel(){
   }
 }
 
-function renderAuthForm(body){
+function authInput(type, placeholder, autocomplete){
+  const i = el("input", "auth-input");
+  i.type = type; i.placeholder = placeholder;
+  if(autocomplete) i.autocomplete = autocomplete;
+  i.required = true; i.maxLength = type === "password" ? 128 : 254;
+  return i;
+}
+
+function authHeader(body, title, sub){
   body.innerHTML = "";
   body.classList.remove("logged-in");
-
   body.appendChild(el("div", "icon-circle", ACCOUNT_ICON));
-  body.appendChild(el("h3", "", authMode === "login" ? "Sign in" : "Create an account"));
-  body.appendChild(el("p", "", authMode === "login"
-    ? "Welcome back — your orders are waiting."
-    : "Track your orders and check out faster."));
+  body.appendChild(el("h3", "", title));
+  const p = el("p");
+  p.textContent = sub;
+  body.appendChild(p);
+}
 
-  const form = el("form", "auth-form");
-  form.noValidate = true;
+function authToggle(body, html, onClick){
+  const t = el("button", "auth-toggle", html);
+  t.type = "button";
+  t.addEventListener("click", onClick);
+  body.appendChild(t);
+}
 
-  const email = el("input", "auth-input");
-  email.type = "email"; email.placeholder = "Email"; email.autocomplete = "email";
-  email.required = true; email.maxLength = 254;
-
-  const password = el("input", "auth-input");
-  password.type = "password"; password.placeholder = "Password (8+ characters)";
-  password.autocomplete = authMode === "login" ? "current-password" : "new-password";
-  password.required = true; password.maxLength = 128;
-
-  const error = el("div", "auth-error");
-
-  const submit = el("button", "auth-submit", authMode === "login" ? "Sign in" : "Create account");
-  submit.type = "submit";
-
-  form.appendChild(email); form.appendChild(password);
-  form.appendChild(error); form.appendChild(submit);
-
+function wireSubmit(form, error, submit, action){
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     error.textContent = "";
     submit.disabled = true;
     try {
-      const call = authMode === "login" ? apiLogin : apiRegister;
-      const result = await call(email.value.trim(), password.value);
-      showToast(authMode === "login"
-        ? "Signed in as " + result.user.email
-        : "Welcome to Aura, " + result.user.email);
-      refreshAccountPanel();
+      await action();
     } catch(err){
+      // A 403 login on an unverified account carries verifyRequired —
+      // jump straight to the code screen instead of showing an error.
+      if(err.data && err.data.verifyRequired){
+        pendingEmail = err.data.email;
+        authMode = "verify";
+        renderAuthForm(document.getElementById("accountBody"));
+        return;
+      }
       error.textContent = err instanceof TypeError ? "No backend running." : err.message;
       submit.disabled = false;
     }
   });
+}
+
+function renderAuthForm(body){
+  const form = el("form", "auth-form");
+  form.noValidate = true;
+  const error = el("div", "auth-error");
+  const submit = el("button", "auth-submit");
+  submit.type = "submit";
+
+  if(authMode === "verify"){
+    authHeader(body, "Check your email",
+      "We sent a 6-digit code to " + pendingEmail + ". Enter it below to activate your account.");
+    const code = authInput("text", "6-digit code", "one-time-code");
+    code.inputMode = "numeric"; code.maxLength = 6;
+    submit.textContent = "Verify";
+    form.appendChild(code); form.appendChild(error); form.appendChild(submit);
+    wireSubmit(form, error, submit, async () => {
+      const result = await apiVerify(pendingEmail, code.value.trim());
+      showToast("Welcome to Aura, " + result.user.email);
+      refreshAccountPanel();
+    });
+    body.appendChild(form);
+    authToggle(body, "Didn't get it? <strong>Send a new code</strong>", async () => {
+      try { await apiResend(pendingEmail); } catch(e){ /* rate limited or offline */ }
+      showToast("If the address is right, a new code is on its way.");
+    });
+    authToggle(body, "<strong>Back to sign in</strong>", () => { authMode = "login"; renderAuthForm(body); });
+    return;
+  }
+
+  if(authMode === "forgot"){
+    authHeader(body, "Reset your password",
+      "Enter your email — we'll send a 6-digit code. Then set a new password below.");
+    const email = authInput("email", "Email", "email");
+    if(pendingEmail) email.value = pendingEmail;
+    const sendBtn = el("button", "auth-submit secondary", "Send code");
+    sendBtn.type = "button";
+    const code = authInput("text", "6-digit code", "one-time-code");
+    code.inputMode = "numeric"; code.maxLength = 6;
+    const newPass = authInput("password", "New password (8+ characters)", "new-password");
+    submit.textContent = "Set new password";
+    form.appendChild(email); form.appendChild(sendBtn);
+    form.appendChild(code); form.appendChild(newPass);
+    form.appendChild(error); form.appendChild(submit);
+    sendBtn.addEventListener("click", async () => {
+      error.textContent = "";
+      sendBtn.disabled = true;
+      try {
+        const r = await apiForgot(email.value.trim());
+        showToast(r.message || "Code sent.");
+      } catch(err){
+        error.textContent = err instanceof TypeError ? "No backend running." : err.message;
+      }
+      sendBtn.disabled = false;
+    });
+    wireSubmit(form, error, submit, async () => {
+      const result = await apiReset(email.value.trim(), code.value.trim(), newPass.value);
+      showToast("Password updated — signed in as " + result.user.email);
+      refreshAccountPanel();
+    });
+    body.appendChild(form);
+    authToggle(body, "<strong>Back to sign in</strong>", () => { authMode = "login"; renderAuthForm(body); });
+    return;
+  }
+
+  const isLogin = authMode === "login";
+  authHeader(body, isLogin ? "Sign in" : "Create an account",
+    isLogin ? "Welcome back — your orders are waiting." : "Track your orders and check out faster.");
+
+  const email = authInput("email", "Email", "email");
+  const password = authInput("password", "Password (8+ characters)", isLogin ? "current-password" : "new-password");
+  submit.textContent = isLogin ? "Sign in" : "Create account";
+  form.appendChild(email); form.appendChild(password);
+  form.appendChild(error); form.appendChild(submit);
+
+  wireSubmit(form, error, submit, async () => {
+    const call = isLogin ? apiLogin : apiRegister;
+    const result = await call(email.value.trim(), password.value);
+    if(result.verifyRequired){
+      pendingEmail = result.email;
+      authMode = "verify";
+      renderAuthForm(body);
+      return;
+    }
+    showToast(isLogin ? "Signed in as " + result.user.email : "Welcome to Aura, " + result.user.email);
+    refreshAccountPanel();
+  });
   body.appendChild(form);
 
-  const toggle = el("button", "auth-toggle", authMode === "login"
+  if(isLogin){
+    authToggle(body, "<strong>Forgot password?</strong>", () => {
+      pendingEmail = email.value.trim();
+      authMode = "forgot"; renderAuthForm(body);
+    });
+  }
+  authToggle(body, isLogin
     ? "New here? <strong>Create an account</strong>"
-    : "Already have an account? <strong>Sign in</strong>");
-  toggle.type = "button";
-  toggle.addEventListener("click", () => {
-    authMode = authMode === "login" ? "register" : "login";
+    : "Already have an account? <strong>Sign in</strong>", () => {
+    authMode = isLogin ? "register" : "login";
     renderAuthForm(body);
   });
-  body.appendChild(toggle);
 }
 
 async function renderLoggedIn(body, user){

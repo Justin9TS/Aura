@@ -48,6 +48,35 @@ cookies (only a hash of the token is stored server-side). Signed-in
 customers get their order history in the drawer and a pre-filled email
 at Stripe checkout.
 
+With email configured (see below), new accounts must enter a 6-digit
+code sent to their address before they can sign in, and there's a
+"Forgot password?" flow that resets via emailed code (and logs out all
+existing sessions). Codes expire after 15 minutes and allow 5 attempts.
+Without email configured, accounts activate instantly and reset is
+disabled.
+
+## Email (verification + password reset)
+
+Fill in `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` /
+`MAIL_FROM` in `.env` — any SMTP provider works (Resend, Mailgun,
+Gmail app password, …). For local testing without a provider, set
+`EMAIL_DEBUG=1` and codes are printed in the server console instead.
+
+## Discord order log
+
+Set `DISCORD_WEBHOOK_URL` in `.env` (Discord channel → Settings →
+Integrations → Webhooks) and every order — demo or paid — is posted to
+that channel as an embed with items, total, customer email, and the
+shipping address collected by Stripe.
+
+## Shipping
+
+Stripe's payment page collects the shipping address during checkout
+(the allowed-countries list lives in `server/server.js`). Once payment
+is confirmed, the address is stored on the order in the database and
+included in the Discord log. It's also visible per-payment in the
+Stripe dashboard.
+
 ## Adding products
 
 Add an object to the `PRODUCTS` array in `js/data.js` — the shop grid,
