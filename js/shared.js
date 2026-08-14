@@ -22,11 +22,10 @@ const ICONS = {
   check: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>'
 };
 
-function fmtPrice(n){ return "$" + n.toFixed(2); }
-function fmtMoney(n){
-  const rounded = Math.round(n * 100) / 100;
-  return rounded % 1 === 0 ? "$" + rounded.toFixed(0) : "$" + rounded.toFixed(2);
-}
+// Prices live in USD internally; these render them in whatever currency
+// the shopper is browsing in (see js/currency.js).
+function fmtPrice(usd){ return formatUsd(usd); }
+function fmtMoney(usd){ return formatUsd(usd); }
 
 function el(tag, cls, html){
   const e = document.createElement(tag);
@@ -120,6 +119,13 @@ const CHROME_HEADER = `
 
 const CHROME_FOOTER = `
 <footer>
+  <div class="country-picker-wrap">
+    <button class="country-picker-btn" id="countryPickerBtn" type="button" aria-expanded="false">
+      <span id="countryPickerLabel">Loading…</span>
+      <span class="caret">▾</span>
+    </button>
+    <div class="country-menu" id="countryMenu" role="listbox"></div>
+  </div>
   <div class="copy">©2026, Aura</div>
   <div class="foot-links">
     <a href="https://based.com/pages/privacy-policy">Privacy Notice</a>
@@ -650,14 +656,84 @@ async function renderLoggedIn(body, user){
       const nameDiv = el("div", "order-names");
       nameDiv.textContent = names;
       row.appendChild(nameDiv);
+      // Show what was actually charged when we know it, so an old order
+      // doesn't get re-quoted at today's rate in a different currency.
+      const amount = o.chargedMinor
+        ? formatMinor(o.chargedMinor, o.currency)
+        : fmtPrice(o.subtotal);
       row.appendChild(el("div", "order-row-bottom",
-        "<span>" + o.createdAt.split(" ")[0] + "</span><span>" + fmtPrice(o.subtotal) + "</span>"));
+        "<span>" + o.createdAt.split(" ")[0] + "</span><span>" + amount + "</span>"));
       list.appendChild(row);
     });
   } catch(e){
     list.textContent = "Couldn't load orders.";
   }
 }
+
+/* ---------- Country / currency picker ---------- */
+// Shows the country we detected (or the one matching the chosen
+// currency) and lets the shopper switch. Changing it reloads so every
+// price on the page is re-rendered from the new rate.
+const FLAGS = {
+  SE:"🇸🇪", NO:"🇳🇴", DK:"🇩🇰", FI:"🇫🇮", IS:"🇮🇸", DE:"🇩🇪", FR:"🇫🇷", NL:"🇳🇱",
+  BE:"🇧🇪", AT:"🇦🇹", ES:"🇪🇸", IT:"🇮🇹", PT:"🇵🇹", IE:"🇮🇪", PL:"🇵🇱", CH:"🇨🇭",
+  GB:"🇬🇧", US:"🇺🇸", CA:"🇨🇦", AU:"🇦🇺", NZ:"🇳🇿", JP:"🇯🇵"
+};
+
+currencyReady.then(() => {
+  const btn = document.getElementById("countryPickerBtn");
+  const menu = document.getElementById("countryMenu");
+  const label = document.getElementById("countryPickerLabel");
+  if(!btn || !COUNTRY_LIST.length){
+    if(label) label.textContent = activeCurrency();
+    return;
+  }
+
+  // Which country to show as current: the detected one when it matches
+  // the active currency, otherwise the first country using it.
+  const current = (DETECTED_COUNTRY && COUNTRY_CURRENCY[DETECTED_COUNTRY] === activeCurrency())
+    ? DETECTED_COUNTRY
+    : (COUNTRY_LIST.find(c => COUNTRY_CURRENCY[c.code] === activeCurrency()) || {}).code;
+
+  function renderLabel(){
+    const country = COUNTRY_LIST.find(c => c.code === current);
+    const flag = current ? (FLAGS[current] || "") : "";
+    label.textContent = (flag ? flag + " " : "") +
+      (country ? country.name : "International") + " · " + activeCurrency();
+  }
+  renderLabel();
+
+  COUNTRY_LIST.forEach(c => {
+    const code = COUNTRY_CURRENCY[c.code] || "USD";
+    const item = el("button", "country-item" + (c.code === current ? " active" : ""),
+      "<span class='country-flag'>" + (FLAGS[c.code] || "") + "</span>" +
+      "<span class='country-name'></span>" +
+      "<span class='country-cur'>" + code + "</span>");
+    item.type = "button";
+    item.setAttribute("role", "option");
+    item.querySelector(".country-name").textContent = c.name;
+    item.addEventListener("click", async () => {
+      try {
+        await setCurrency(code);
+        window.location.reload();
+      } catch(e){
+        showToast("Couldn't change currency.");
+      }
+    });
+    menu.appendChild(item);
+  });
+
+  function toggleMenu(force){
+    const show = force !== undefined ? force : !menu.classList.contains("show");
+    menu.classList.toggle("show", show);
+    btn.setAttribute("aria-expanded", String(show));
+  }
+  btn.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(); });
+  document.addEventListener("click", (e) => {
+    if(!menu.contains(e.target) && e.target !== btn) toggleMenu(false);
+  });
+  document.addEventListener("keydown", (e) => { if(e.key === "Escape") toggleMenu(false); });
+});
 
 /* ---------- Cookie notice ---------- */
 const cookieBanner = document.getElementById("cookieBanner");
@@ -670,4 +746,5 @@ document.getElementById("cookieReject").addEventListener("click", () => dismissC
 document.getElementById("cookieSettings").addEventListener("click", () => dismissCookies("Cookie preferences saved."));
 setTimeout(() => cookieBanner.classList.add("show"), 400);
 
-renderCart();
+// Wait for the currency so the cart never flashes the wrong prices.
+currencyReady.then(renderCart);

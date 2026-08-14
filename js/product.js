@@ -9,7 +9,7 @@
 
 "use strict";
 
-productsReady.then(products => {
+Promise.all([productsReady, currencyReady]).then(([products]) => {
   const params = new URLSearchParams(window.location.search);
   const slug = params.get("p") || "";
   const product = products.find(p => p.slug === slug) || null;

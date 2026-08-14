@@ -3,7 +3,7 @@
 
 "use strict";
 
-productsReady.then(products => {
+Promise.all([productsReady, currencyReady]).then(([products]) => {
   const container = document.getElementById("products");
   container.innerHTML = "";
 

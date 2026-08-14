@@ -72,6 +72,8 @@ if(!orderCols.includes("status"))             db.exec("ALTER TABLE orders ADD CO
 if(!orderCols.includes("stripe_session_id"))  db.exec("ALTER TABLE orders ADD COLUMN stripe_session_id TEXT");
 if(!orderCols.includes("customer_email"))     db.exec("ALTER TABLE orders ADD COLUMN customer_email TEXT");
 if(!orderCols.includes("shipping_json"))      db.exec("ALTER TABLE orders ADD COLUMN shipping_json TEXT");
+if(!orderCols.includes("currency"))           db.exec("ALTER TABLE orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'");
+if(!orderCols.includes("charged_minor"))      db.exec("ALTER TABLE orders ADD COLUMN charged_minor INTEGER");
 
 // Existing users predate email verification — keep them valid.
 const userCols = db.prepare("SELECT name FROM pragma_table_info('users')").all().map(c => c.name);
@@ -124,8 +126,8 @@ function getProductRow(slug){ return getStmt.get(slug) || null; }
 
 /* ---------- orders ---------- */
 const orderInsertStmt = db.prepare(`
-  INSERT INTO orders (subtotal_cents, items_json, user_id, status, stripe_session_id)
-  VALUES (?, ?, ?, ?, ?)
+  INSERT INTO orders (subtotal_cents, items_json, user_id, status, stripe_session_id, currency, charged_minor)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
 `);
 const orderBySessionStmt = db.prepare("SELECT * FROM orders WHERE stripe_session_id = ?");
 const orderByIdStmt = db.prepare("SELECT * FROM orders WHERE id = ?");
@@ -140,7 +142,9 @@ function createOrder(subtotalCents, items, opts){
     JSON.stringify(items),
     opts.userId || null,
     opts.status || "demo",
-    opts.stripeSessionId || null
+    opts.stripeSessionId || null,
+    opts.currency || "USD",
+    opts.chargedMinor || null
   );
   return Number(result.lastInsertRowid);
 }
@@ -164,9 +168,46 @@ function listOrdersForUser(userId){
     id: row.id,
     createdAt: row.created_at,
     subtotal: row.subtotal_cents / 100,
+    currency: row.currency || "USD",
+    chargedMinor: row.charged_minor,
     status: row.status,
     items: JSON.parse(row.items_json).map(i => ({ name: i.name, qty: i.qty }))
   }));
+}
+
+/* ---------- admin ---------- */
+const adminOrdersStmt = db.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT ?");
+const adminStatsStmt = db.prepare(`
+  SELECT
+    COUNT(*) AS total_orders,
+    COALESCE(SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END), 0) AS paid_orders,
+    COALESCE(SUM(CASE WHEN status = 'paid' THEN subtotal_cents ELSE 0 END), 0) AS paid_cents
+  FROM orders
+`);
+const adminUsersStmt = db.prepare("SELECT COUNT(*) AS n FROM users");
+
+function listAllOrders(limit){
+  return adminOrdersStmt.all(limit || 100).map(row => ({
+    id: row.id,
+    createdAt: row.created_at,
+    subtotal: row.subtotal_cents / 100,
+    currency: row.currency || "USD",
+    chargedMinor: row.charged_minor,
+    status: row.status,
+    customerEmail: row.customer_email,
+    shipping: row.shipping_json ? JSON.parse(row.shipping_json) : null,
+    items: JSON.parse(row.items_json)
+  }));
+}
+
+function adminStats(){
+  const s = adminStatsStmt.get();
+  return {
+    totalOrders: s.total_orders,
+    paidOrders: s.paid_orders,
+    revenueUsd: s.paid_cents / 100,
+    users: adminUsersStmt.get().n
+  };
 }
 
 /* ---------- users & sessions ---------- */
@@ -234,6 +275,7 @@ pruneExpiredSessions();
 module.exports = {
   listProducts, getProductRow, toApiProduct,
   createOrder, getOrderByStripeSession, getOrderById, markOrderPaid, setOrderCustomer, listOrdersForUser,
+  listAllOrders, adminStats,
   createUser, getUserByEmail, markUserVerified, updateUserPassword, deleteSessionsForUser,
   createSession, getSession, deleteSession, pruneExpiredSessions,
   saveEmailCode, getEmailCode, bumpCodeAttempts, deleteEmailCode

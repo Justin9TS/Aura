@@ -69,6 +69,41 @@ Integrations → Webhooks) and every order — demo or paid — is posted to
 that channel as an embed with items, total, customer email, and the
 shipping address collected by Stripe.
 
+## Currency
+
+Prices are stored once, in USD, and converted for display and for
+Stripe. A visitor's country is detected from their IP (via a CDN header
+when the host provides one, otherwise a cached ipapi.co lookup) and
+mapped to a currency; the picker in the footer lets anyone override it,
+remembered in a cookie for a year. Rates and the country→currency map
+live in `server/currency.js` — **update the rates there every few
+months**. Orders record the currency and exact amount charged, so old
+orders always display what was really paid.
+
+## Launch page
+
+`launch.html` is a standalone black coming-soon screen with a split-flap
+countdown. Set the date at the top of `js/launch.js`:
+
+```js
+const LAUNCH_DATE = "2026-09-01T18:00:00+02:00";
+```
+
+When it hits zero it swaps to "We're live" with a button into the store.
+To use it as the front page at launch time, rename `index.html` to
+`shop.html` and `launch.html` to `index.html` (and point `STORE_URL` at
+`shop.html`), then swap back when you go live.
+
+## Admin
+
+`admin.html` is a private dashboard: revenue, order count, customers,
+setup status, and every order with items, shipping address and status.
+
+Access is a single account: set `ADMIN_EMAIL` in `.env`, register that
+email on the store like a normal customer, and sign in. Everyone else —
+signed in or not — gets a "Not found" page, and the admin API returns
+404 rather than admitting it exists.
+
 ## Shipping
 
 Stripe's payment page collects the shipping address during checkout

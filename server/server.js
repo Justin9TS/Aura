@@ -50,6 +50,8 @@ const db = require("./db.js");
 const { PACK_OPTIONS, linePriceCents } = require("./pricing.js");
 const { hashPassword, verifyPassword, DUMMY_HASH, newSessionToken, hashToken } = require("./auth.js");
 const { notifyOrderDiscord, emailEnabled, sendCodeEmail } = require("./notify.js");
+const currency = require("./currency.js");
+const { countryForRequest } = require("./geo.js");
 
 // On networks that require an outbound proxy (corporate/cloud), route
 // Stripe API calls through it. No-op when HTTPS_PROXY isn't set.
@@ -73,6 +75,11 @@ const IS_PROD = process.env.NODE_ENV === "production";
 
 const SESSION_COOKIE = "aura_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const CURRENCY_COOKIE = "aura_currency";
+const CURRENCY_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+// The one account allowed into /admin. Set ADMIN_EMAIL in .env.
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 
 app.disable("x-powered-by");
 
@@ -212,6 +219,56 @@ function requireAuth(req, res, next){
   if(!req.user) return res.status(401).json({ error: "Sign in required." });
   next();
 }
+
+// Admin = signed in AND the session's email matches ADMIN_EMAIL exactly.
+// Unauthorized callers get 404, not 403, so the admin API doesn't even
+// advertise that it exists.
+function isAdmin(user){
+  return Boolean(ADMIN_EMAIL && user && user.email.toLowerCase() === ADMIN_EMAIL);
+}
+function requireAdmin(req, res, next){
+  if(!isAdmin(req.user)) return res.status(404).json({ error: "Not found." });
+  next();
+}
+
+/* ---------- currency ---------- */
+// Explicit choice (cookie) wins; otherwise guess from the visitor's country.
+async function resolveCurrency(req){
+  const chosen = getCookie(req, CURRENCY_COOKIE);
+  if(chosen && currency.isValidCurrency(chosen)){
+    return { code: chosen.toUpperCase(), country: null, chosen: true };
+  }
+  let country = null;
+  try { country = await countryForRequest(req); } catch(e){ /* default below */ }
+  return { code: currency.currencyForCountry(country), country, chosen: false };
+}
+
+app.get("/api/currency", async (req, res) => {
+  const resolved = await resolveCurrency(req);
+  res.json({
+    currency: resolved.code,
+    country: resolved.country,
+    chosen: resolved.chosen,
+    rates: currency.CURRENCIES,
+    countries: currency.COUNTRIES,
+    countryCurrency: currency.COUNTRY_CURRENCY
+  });
+});
+
+app.post("/api/currency", (req, res) => {
+  const code = String((req.body && req.body.currency) || "").toUpperCase();
+  if(!currency.isValidCurrency(code)){
+    return res.status(400).json({ error: "Unsupported currency." });
+  }
+  res.cookie(CURRENCY_COOKIE, code, {
+    httpOnly: false,          // the frontend reads this to format prices
+    sameSite: "lax",
+    secure: IS_PROD,
+    maxAge: CURRENCY_TTL_MS,
+    path: "/"
+  });
+  res.json({ currency: code });
+});
 
 /* ---------- validation helpers ---------- */
 const SLUG_RE = /^[a-z0-9-]{1,100}$/;
@@ -441,6 +498,8 @@ app.post("/api/checkout", checkoutLimiter, async (req, res) => {
 
   try {
     const origin = req.protocol + "://" + req.get("host");
+    // Charge in the shopper's currency, converted from the USD base.
+    const { code: currencyCode } = await resolveCurrency(req);
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       // Newer Stripe accounts enable "Managed Payments" by default, which
@@ -450,8 +509,8 @@ app.post("/api/checkout", checkoutLimiter, async (req, res) => {
       line_items: validated.map(item => ({
         quantity: item.qty,
         price_data: {
-          currency: "usd",
-          unit_amount: item.unit_price_cents,
+          currency: currencyCode.toLowerCase(),
+          unit_amount: currency.convertAmount(item.unit_price_cents, currencyCode),
           product_data: { name: item.name }
         }
       })),
@@ -473,7 +532,9 @@ app.post("/api/checkout", checkoutLimiter, async (req, res) => {
     db.createOrder(subtotalCents, validated, {
       userId: req.user ? req.user.userId : null,
       status: "pending",
-      stripeSessionId: session.id
+      stripeSessionId: session.id,
+      currency: currencyCode,
+      chargedMinor: session.amount_total
     });
     res.status(201).json({ url: session.url });
   } catch(e){
@@ -505,6 +566,28 @@ app.get("/api/checkout/confirm", async (req, res) => {
     console.error("Stripe confirm error:", e.message);
     res.status(502).json({ error: "Could not verify payment, contact support." });
   }
+});
+
+/* ---------- admin API ---------- */
+app.get("/api/admin/summary", requireAdmin, (req, res) => {
+  res.json({
+    stats: db.adminStats(),
+    orders: db.listAllOrders(200),
+    productCount: db.listProducts().length,
+    config: {
+      stripe: Boolean(stripe),
+      discord: Boolean(process.env.DISCORD_WEBHOOK_URL),
+      email: emailEnabled(),
+      liveMode: String(process.env.STRIPE_SECRET_KEY || "").startsWith("sk_live_"),
+      ratesUpdated: currency.RATES_UPDATED
+    }
+  });
+});
+
+// Lets admin.html decide whether to render the dashboard or a 404-style
+// page, without leaking anything to non-admins.
+app.get("/api/admin/check", (req, res) => {
+  res.json({ admin: isAdmin(req.user) });
 });
 
 app.use("/api", (req, res) => {
