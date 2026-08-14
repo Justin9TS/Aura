@@ -156,13 +156,7 @@ const CHROME_FOOTER = `
     <h2>Account</h2>
     <button class="cart-close" id="accountCloseBtn" type="button" aria-label="Close account panel">✕</button>
   </div>
-  <div class="account-body">
-    <div class="icon-circle">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-    </div>
-    <h3>Sign in or create an account</h3>
-    <p>Account creation and sign-in aren't wired up yet — this panel is a placeholder for that flow.</p>
-  </div>
+  <div class="account-body" id="accountBody"></div>
 </aside>
 
 <button class="discount-btn" id="discountBtn" type="button">Claim 15% Discount</button>
@@ -361,7 +355,10 @@ function openPanel(name){
 document.getElementById("cartBtn").addEventListener("click", () => openPanel("cart"));
 document.getElementById("cartCloseBtn").addEventListener("click", closeAllPanels);
 
-document.getElementById("accountBtn").addEventListener("click", () => openPanel("account"));
+document.getElementById("accountBtn").addEventListener("click", () => {
+  openPanel("account");
+  refreshAccountPanel();
+});
 document.getElementById("accountCloseBtn").addEventListener("click", closeAllPanels);
 
 document.getElementById("discountBtn").addEventListener("click", () => openPanel("discount"));
@@ -373,6 +370,9 @@ document.addEventListener("keydown", (e) => { if(e.key === "Escape") closeAllPan
 /* ---------- Checkout ---------- */
 // Sends only { slug, option, qty } — the server looks prices up in the
 // database, so tampering with client-side prices changes nothing.
+// With Stripe configured the server answers with a payment page URL and
+// the cart is cleared on the success page after payment; without Stripe
+// it records a demo order right away.
 document.getElementById("checkoutBtn").addEventListener("click", async () => {
   if(cart.length === 0) return;
   const btn = document.getElementById("checkoutBtn");
@@ -380,11 +380,15 @@ document.getElementById("checkoutBtn").addEventListener("click", async () => {
   btn.textContent = "Processing…";
   try {
     const order = await apiCheckout(cart.map(i => ({ slug: i.slug, option: i.option, qty: i.qty })));
+    if(order.url){
+      window.location.href = order.url;
+      return;
+    }
     clearCart();
     closeAllPanels();
-    showToast("Order #" + order.orderId + " placed — " + fmtPrice(order.subtotal) + " total. (Payment comes later.)");
+    showToast("Order #" + order.orderId + " recorded — " + fmtPrice(order.subtotal) + " total. (Demo: payments not configured.)");
   } catch(e){
-    showToast(e.message.indexOf("fetch") !== -1 || e instanceof TypeError
+    showToast(e instanceof TypeError
       ? "No backend running — start it with: npm start"
       : e.message);
   } finally {
@@ -424,6 +428,138 @@ document.addEventListener("click", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => { if(e.key === "Escape") toggleMegaMenu(false); });
+
+/* ---------- Account panel (sign in / register / order history) ---------- */
+const ACCOUNT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>';
+let authMode = "login"; // or "register"
+
+async function refreshAccountPanel(){
+  const body = document.getElementById("accountBody");
+  let me = null;
+  try {
+    me = await apiMe();
+  } catch(e){
+    body.innerHTML = "";
+    body.appendChild(el("div", "icon-circle", ACCOUNT_ICON));
+    body.appendChild(el("h3", "", "Accounts need the backend"));
+    body.appendChild(el("p", "", "Start the server with <code>npm start</code> and open the site at localhost:3000 to sign in."));
+    return;
+  }
+  if(me.user){
+    authMode = "login"; // after signing out, the form starts on "Sign in"
+    renderLoggedIn(body, me.user);
+  } else {
+    renderAuthForm(body);
+  }
+}
+
+function renderAuthForm(body){
+  body.innerHTML = "";
+  body.classList.remove("logged-in");
+
+  body.appendChild(el("div", "icon-circle", ACCOUNT_ICON));
+  body.appendChild(el("h3", "", authMode === "login" ? "Sign in" : "Create an account"));
+  body.appendChild(el("p", "", authMode === "login"
+    ? "Welcome back — your orders are waiting."
+    : "Track your orders and check out faster."));
+
+  const form = el("form", "auth-form");
+  form.noValidate = true;
+
+  const email = el("input", "auth-input");
+  email.type = "email"; email.placeholder = "Email"; email.autocomplete = "email";
+  email.required = true; email.maxLength = 254;
+
+  const password = el("input", "auth-input");
+  password.type = "password"; password.placeholder = "Password (8+ characters)";
+  password.autocomplete = authMode === "login" ? "current-password" : "new-password";
+  password.required = true; password.maxLength = 128;
+
+  const error = el("div", "auth-error");
+
+  const submit = el("button", "auth-submit", authMode === "login" ? "Sign in" : "Create account");
+  submit.type = "submit";
+
+  form.appendChild(email); form.appendChild(password);
+  form.appendChild(error); form.appendChild(submit);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    submit.disabled = true;
+    try {
+      const call = authMode === "login" ? apiLogin : apiRegister;
+      const result = await call(email.value.trim(), password.value);
+      showToast(authMode === "login"
+        ? "Signed in as " + result.user.email
+        : "Welcome to Aura, " + result.user.email);
+      refreshAccountPanel();
+    } catch(err){
+      error.textContent = err instanceof TypeError ? "No backend running." : err.message;
+      submit.disabled = false;
+    }
+  });
+  body.appendChild(form);
+
+  const toggle = el("button", "auth-toggle", authMode === "login"
+    ? "New here? <strong>Create an account</strong>"
+    : "Already have an account? <strong>Sign in</strong>");
+  toggle.type = "button";
+  toggle.addEventListener("click", () => {
+    authMode = authMode === "login" ? "register" : "login";
+    renderAuthForm(body);
+  });
+  body.appendChild(toggle);
+}
+
+async function renderLoggedIn(body, user){
+  body.innerHTML = "";
+  body.classList.add("logged-in");
+
+  body.appendChild(el("div", "icon-circle", ACCOUNT_ICON));
+  // textContent, not innerHTML — the email is user-controlled input.
+  const who = el("h3");
+  who.textContent = user.email;
+  body.appendChild(who);
+
+  const ordersBox = el("div", "orders-box");
+  ordersBox.appendChild(el("h4", "", "Your orders"));
+  const list = el("div", "orders-list", "Loading…");
+  ordersBox.appendChild(list);
+  body.appendChild(ordersBox);
+
+  const signOut = el("button", "auth-signout", "Sign out");
+  signOut.type = "button";
+  signOut.addEventListener("click", async () => {
+    try { await apiLogout(); } catch(e){ /* session cookie cleared server-side anyway */ }
+    showToast("Signed out.");
+    refreshAccountPanel();
+  });
+  body.appendChild(signOut);
+
+  try {
+    const orders = await apiOrders();
+    list.innerHTML = "";
+    if(orders.length === 0){
+      list.appendChild(el("div", "orders-empty", "No orders yet — your first one will show up here."));
+      return;
+    }
+    orders.forEach(o => {
+      const row = el("div", "order-row");
+      const names = o.items.map(i => i.name + (i.qty > 1 ? " ×" + i.qty : "")).join(", ");
+      row.appendChild(el("div", "order-row-top",
+        "<span>Order #" + o.id + "</span><span class='order-status " + o.status + "'>" + o.status + "</span>"));
+      const nameDiv = el("div", "order-names");
+      nameDiv.textContent = names;
+      row.appendChild(nameDiv);
+      row.appendChild(el("div", "order-row-bottom",
+        "<span>" + o.createdAt.split(" ")[0] + "</span><span>" + fmtPrice(o.subtotal) + "</span>"));
+      list.appendChild(row);
+    });
+  } catch(e){
+    list.textContent = "Couldn't load orders.";
+  }
+}
 
 /* ---------- Cookie notice ---------- */
 const cookieBanner = document.getElementById("cookieBanner");

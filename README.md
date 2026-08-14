@@ -1,7 +1,7 @@
 # Aura
 
 A small web store: static frontend (plain HTML/CSS/JS) plus a Node.js
-backend with a SQLite database.
+backend with a SQLite database, accounts, and Stripe payments.
 
 ## Run it
 
@@ -19,9 +19,34 @@ The database is a single file, `data/aura.sqlite`, created and seeded
 automatically from `js/data.js` on first start. Delete the file to reset
 everything.
 
-The frontend also still works without the backend (open `index.html`
-directly) — it falls back to the static product list, and checkout tells
-you the backend isn't running.
+Without a Stripe key the store runs in **demo mode**: checkout validates
+and records orders but takes no payment.
+
+## Enabling real payments (Stripe)
+
+1. Create a free account at https://stripe.com
+2. In the Stripe dashboard (Test mode), copy your **Secret key**
+   (starts with `sk_test_`) from Developers → API keys
+3. Copy `.env.example` to `.env` and paste the key into
+   `STRIPE_SECRET_KEY=`
+4. Restart the server (`npm start`)
+
+Checkout now redirects to Stripe's hosted payment page. In test mode,
+pay with card number `4242 4242 4242 4242`, any future expiry date, any
+CVC. No real money moves until you swap in a live key.
+
+For production, also create a webhook endpoint in Stripe pointing at
+`https://yourdomain.com/api/stripe/webhook` (event:
+`checkout.session.completed`) and put its signing secret in
+`STRIPE_WEBHOOK_SECRET`.
+
+## Accounts
+
+Sign up / sign in lives in the account drawer (person icon in the
+navbar). Passwords are hashed with scrypt; sessions are 30-day httpOnly
+cookies (only a hash of the token is stored server-side). Signed-in
+customers get their order history in the drawer and a pre-filled email
+at Stripe checkout.
 
 ## Adding products
 
@@ -32,36 +57,49 @@ re-seeds with your new product.
 
 ## Layout
 
-| Path              | What it is                                                   |
-|-------------------|--------------------------------------------------------------|
-| `index.html`      | Shop page (hero banner + product grid)                       |
-| `product.html`    | Product detail page (`?p=<slug>`)                            |
-| `styles.css`      | All styling                                                  |
-| `js/data.js`      | Product catalog (also seeds the database)                    |
-| `js/api.js`       | Loads the catalog from the API, falls back to `js/data.js`   |
-| `js/shared.js`    | Navbar/drawers/footer injection, cart (localStorage), panels |
-| `js/home.js`      | Shop grid                                                    |
-| `js/product.js`   | Product detail page                                          |
-| `server/server.js`| Express server: static files + JSON API                      |
-| `server/db.js`    | SQLite layer (`node:sqlite`), schema + seeding               |
-| `server/pricing.js`| Pack options/discounts — checkout's source of truth         |
+| Path                  | What it is                                                   |
+|-----------------------|--------------------------------------------------------------|
+| `index.html`          | Shop page (hero banner + product grid)                       |
+| `product.html`        | Product detail page (`?p=<slug>`)                            |
+| `checkout-success.html`| Post-payment landing page (verifies the Stripe session)     |
+| `styles.css`          | All styling                                                  |
+| `js/data.js`          | Product catalog (also seeds the database)                    |
+| `js/api.js`           | Fetch helpers: catalog, auth, checkout                       |
+| `js/shared.js`        | Navbar/drawers/footer injection, cart, account panel         |
+| `js/home.js`          | Shop grid                                                    |
+| `js/product.js`       | Product detail page                                          |
+| `js/success.js`       | Payment confirmation page logic                              |
+| `server/server.js`    | Express server: static files + JSON API                      |
+| `server/db.js`        | SQLite layer (`node:sqlite`), schema + seeding + migration   |
+| `server/auth.js`      | scrypt password hashing + session tokens                     |
+| `server/pricing.js`   | Pack options/discounts — checkout's source of truth          |
 
 ## API
 
 - `GET /api/products` — full catalog
 - `GET /api/products/:slug` — one product
+- `POST /api/auth/register` / `login` / `logout`, `GET /api/auth/me`
+- `GET /api/orders` — signed-in user's order history
 - `POST /api/checkout` — `{ items: [{ slug, option, qty }] }`; validates
   everything, prices the cart from the database (client prices are
-  ignored), records the order, returns `{ orderId, subtotal }`
+  ignored). Returns a Stripe payment URL, or records a demo order when
+  Stripe isn't configured
+- `GET /api/checkout/confirm?session_id=` — verifies payment after Stripe
+  redirects back
+- `POST /api/stripe/webhook` — server-to-server payment confirmation
 
 ## Security
 
 - Strict security headers via helmet, including a Content-Security-Policy
   that blocks all external scripts
-- Rate limiting on the API (tighter on checkout)
+- Rate limiting on the API (tighter on checkout and auth)
 - JSON bodies capped at 10kb
 - All inputs validated against whitelists; all SQL uses prepared
   statements
-- Prices always recomputed server-side
-
-Payments, accounts, and an admin panel are not built yet.
+- Prices always recomputed server-side; payment status verified with
+  Stripe server-to-server, never trusted from the browser
+- scrypt password hashes with per-user salts, constant-time comparisons,
+  login timing equalized so account existence can't be probed
+- Session cookies are httpOnly + SameSite=Lax (secure in production);
+  the database stores only SHA-256 hashes of session tokens
+- Card numbers never touch this server — Stripe's hosted page handles them

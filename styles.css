@@ -646,3 +646,83 @@ footer .foot-links a:hover{ color:var(--sky-deep); text-decoration:underline; }
 .set-box-title{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .perk-icon svg{ width:22px; height:22px; color:var(--sky-deep); }
 .cart-shipping .icon-svg{ width:15px; height:15px; }
+
+/* ---------- ACCOUNT PANEL: AUTH + ORDERS ---------- */
+.account-body{ justify-content:flex-start; padding-top:48px; overflow-y:auto; }
+.account-body code{ background:var(--sky-pale); padding:1px 6px; border-radius:5px; font-size:12px; }
+
+.auth-form{ display:flex; flex-direction:column; gap:10px; width:100%; max-width:280px; margin-top:10px; }
+.auth-input{
+  width:100%; padding:11px 14px; border-radius:10px;
+  border:1.5px solid var(--line); background:var(--white);
+  font-family:inherit; font-size:13.5px; color:var(--ink);
+  transition: border-color .15s ease;
+}
+.auth-input:focus{ outline:none; border-color:var(--sky); }
+.auth-error{ min-height:16px; font-size:12px; color:#c2451f; text-align:left; }
+.auth-submit{
+  border:none; border-radius:10px; padding:12px;
+  background:var(--sky-deep); color:#fff; font-size:13.5px; font-weight:700;
+  transition: background .15s ease;
+}
+.auth-submit:hover{ background:#3d6fd1; }
+.auth-submit:disabled{ background:#c8d6ef; cursor:not-allowed; }
+.auth-toggle{
+  margin-top:6px; border:none; background:transparent;
+  font-size:12.5px; color:var(--ink-soft);
+}
+.auth-toggle strong{ color:var(--sky-deep); }
+.auth-toggle:hover strong{ text-decoration:underline; }
+
+.account-body.logged-in{ align-items:stretch; text-align:left; }
+.account-body.logged-in .icon-circle,
+.account-body.logged-in h3{ align-self:center; }
+.account-body.logged-in h3{ word-break:break-all; text-align:center; }
+
+.orders-box{ width:100%; margin-top:14px; }
+.orders-box h4{
+  margin:0 0 10px; font-size:11.5px; text-transform:uppercase;
+  letter-spacing:0.08em; color:var(--ink-soft); font-weight:700;
+}
+.orders-list{ display:flex; flex-direction:column; gap:10px; font-size:13px; color:var(--ink-soft); }
+.orders-empty{ font-size:12.5px; color:var(--ink-soft); }
+.order-row{
+  border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+  display:flex; flex-direction:column; gap:4px;
+  background:var(--white); box-shadow:var(--shadow);
+}
+.order-row-top{ display:flex; justify-content:space-between; font-weight:700; color:var(--ink); font-size:13px; }
+.order-status{
+  font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em;
+  padding:2px 8px; border-radius:6px; background:var(--sky-pale); color:var(--sky-deep);
+}
+.order-status.pending{ background:#fdf1dc; color:#a9731c; }
+.order-status.demo{ background:#eef1f5; color:var(--ink-soft); }
+.order-names{ font-size:12px; color:var(--ink-soft); line-height:1.4; }
+.order-row-bottom{ display:flex; justify-content:space-between; font-size:12px; color:var(--ink-soft); }
+.order-row-bottom span:last-child{ font-weight:700; color:var(--sky-deep); }
+.auth-signout{
+  margin-top:16px; align-self:center;
+  border:1.5px solid var(--line); border-radius:999px; padding:8px 22px;
+  background:var(--white); color:var(--ink-soft); font-size:12.5px; font-weight:600;
+  transition: border-color .15s ease, color .15s ease;
+}
+.auth-signout:hover{ border-color:var(--sky); color:var(--sky-deep); }
+
+/* ---------- CHECKOUT SUCCESS PAGE ---------- */
+.success-page{ display:flex; justify-content:center; padding:80px 0 100px; }
+.success-card{
+  background:var(--white); border:1px solid var(--line); border-radius:20px;
+  box-shadow:var(--shadow); padding:48px 44px; max-width:480px; width:100%;
+  display:flex; flex-direction:column; align-items:center; gap:14px; text-align:center;
+}
+.success-icon svg{ width:56px; height:56px; color:var(--sky-deep); }
+.success-card h1{ font-size:24px; font-weight:800; letter-spacing:-0.01em; color:var(--ink); }
+.success-card p{ margin:0; font-size:14px; color:var(--ink-soft); }
+.success-btn{
+  margin-top:12px; text-decoration:none;
+  background:var(--sky-deep); color:#fff; border-radius:999px;
+  padding:11px 28px; font-size:13.5px; font-weight:700;
+  transition: background .15s ease;
+}
+.success-btn:hover{ background:#3d6fd1; }
