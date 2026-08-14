@@ -76,6 +76,17 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 app.disable("x-powered-by");
 
+// In production (behind a host's TLS proxy): trust the proxy's headers
+// and force every plain-http request over to https. helmet adds HSTS on
+// top so browsers stop trying http at all.
+if(IS_PROD){
+  app.set("trust proxy", 1);
+  app.use((req, res, next) => {
+    if(req.secure) return next();
+    res.redirect(301, "https://" + req.get("host") + req.originalUrl);
+  });
+}
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -215,6 +226,13 @@ function validPassword(raw){
   return typeof raw === "string" && raw.length >= 8 && raw.length <= 128;
 }
 
+// Honeypot: the auth forms contain an invisible "website" field that
+// humans never see. Form-filling bots stuff every field, so anything in
+// it means a bot — reject with the same generic error as bad input.
+function tripsHoneypot(req){
+  return typeof req.body?.website === "string" && req.body.website.length > 0;
+}
+
 /* ---------- email codes (verification + password reset) ---------- */
 const CODE_TTL_MS = 15 * 60 * 1000;
 const CODE_MAX_ATTEMPTS = 5;
@@ -241,6 +259,7 @@ function checkCode(email, purpose, submitted){
 
 /* ---------- auth routes ---------- */
 app.post("/api/auth/register", async (req, res) => {
+  if(tripsHoneypot(req)) return res.status(400).json({ error: "Enter a valid email address." });
   const email = normalizeEmail(req.body && req.body.email);
   if(!email) return res.status(400).json({ error: "Enter a valid email address." });
   if(!validPassword(req.body.password)){
@@ -293,6 +312,7 @@ app.post("/api/auth/resend", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
+  if(tripsHoneypot(req)) return res.status(401).json({ error: "Invalid email or password." });
   const email = normalizeEmail(req.body && req.body.email);
   const password = req.body && req.body.password;
   const user = email ? db.getUserByEmail(email) : null;

@@ -38,8 +38,8 @@ async function apiRequest(method, url, body){
 function apiCheckout(items){ return apiRequest("POST", "/api/checkout", { items }); }
 function apiConfirm(sessionId){ return apiRequest("GET", "/api/checkout/confirm?session_id=" + encodeURIComponent(sessionId)); }
 
-function apiRegister(email, password){ return apiRequest("POST", "/api/auth/register", { email, password }); }
-function apiLogin(email, password){ return apiRequest("POST", "/api/auth/login", { email, password }); }
+function apiRegister(email, password, website){ return apiRequest("POST", "/api/auth/register", { email, password, website }); }
+function apiLogin(email, password, website){ return apiRequest("POST", "/api/auth/login", { email, password, website }); }
 function apiVerify(email, code){ return apiRequest("POST", "/api/auth/verify", { email, code }); }
 function apiResend(email){ return apiRequest("POST", "/api/auth/resend", { email }); }
 function apiForgot(email){ return apiRequest("POST", "/api/auth/forgot", { email }); }

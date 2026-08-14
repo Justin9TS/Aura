@@ -573,13 +573,18 @@ function renderAuthForm(body){
 
   const email = authInput("email", "Email", "email");
   const password = authInput("password", "Password (8+ characters)", isLogin ? "current-password" : "new-password");
+  // Invisible honeypot field — humans never see it, form-filling bots
+  // fill it, and the server rejects any request where it has a value.
+  const trap = el("input", "hp-field");
+  trap.type = "text"; trap.name = "website"; trap.tabIndex = -1;
+  trap.autocomplete = "off"; trap.setAttribute("aria-hidden", "true");
   submit.textContent = isLogin ? "Sign in" : "Create account";
-  form.appendChild(email); form.appendChild(password);
+  form.appendChild(email); form.appendChild(password); form.appendChild(trap);
   form.appendChild(error); form.appendChild(submit);
 
   wireSubmit(form, error, submit, async () => {
     const call = isLogin ? apiLogin : apiRegister;
-    const result = await call(email.value.trim(), password.value);
+    const result = await call(email.value.trim(), password.value, trap.value);
     if(result.verifyRequired){
       pendingEmail = result.email;
       authMode = "verify";

@@ -732,3 +732,9 @@ footer .foot-links a:hover{ color:var(--sky-deep); text-decoration:underline; }
   border:1.5px solid var(--sky);
 }
 .auth-submit.secondary:hover{ background:var(--sky-pale); }
+
+/* Honeypot field — invisible to humans, filled only by bots */
+.hp-field{
+  position:absolute; left:-9999px; top:-9999px;
+  width:1px; height:1px; opacity:0; pointer-events:none;
+}
